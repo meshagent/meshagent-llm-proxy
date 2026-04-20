@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "meshagent-llm-proxy"
+description = "Shared LLM proxy helpers for MeshAgent"
+requires-python = ">=3.13"
+license = "Apache-2.0"
+keywords = []
+dependencies = [
+  "aiohttp[speedups]~=3.13.0",
+  "meshagent-anthropic~=0.37.2",
+  "meshagent-openai~=0.37.2",
+]
+dynamic = ["version", "readme"]
+
+[project.urls]
+Documentation = "https://docs.meshagent.com"
+Website = "https://www.meshagent.com"
+Source = "https://www.meshagent.com"
+
+[tool.setuptools.packages.find]
+include = ["meshagent.*"]
+
+[tool.setuptools.package-data]
+"meshagent" = ["py.typed", "*.pyi", "**/*.pyi", "**/*.js"]
+
+[tool.setuptools.dynamic]
+version = {attr = "meshagent.llm_proxy.version.__version__"}
+readme = { file = "README.md", content-type = "text/markdown" }
