@@ -451,6 +451,8 @@ claude_opus_4_6_pricing = {
     "output_tokens_long": per_million(37.50),
 }
 
+claude_opus_4_7_pricing = claude_opus_4_6_pricing
+
 claude_opus_4_5_pricing = {
     "input_tokens": per_million(5.00),
     "cache_creation_input_tokens": per_million(6.25),
@@ -761,6 +763,7 @@ pricing = {
     },
     "anthropic": {
         # Latest model aliases
+        "claude-opus-4-7": claude_opus_4_7_pricing,
         "claude-opus-4-6": claude_opus_4_6_pricing,
         "claude-opus-4-5": claude_opus_4_5_pricing,
         "claude-sonnet-4-6": claude_sonnet_4_6_pricing,
