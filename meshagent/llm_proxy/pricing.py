@@ -534,7 +534,16 @@ computer_use_preview_pricing = {
 pricing = {
     "openai": {
         # Image models
-        # Source: https://platform.openai.com/docs/pricing
+        # Source: https://developers.openai.com/api/docs/pricing
+        "gpt-image-2": {
+            # Text tokens
+            "input_tokens": per_million(5.00),
+            "cached_tokens": per_million(1.25),
+            # Image tokens
+            "image_input_tokens": per_million(8.00),
+            "image_cached_tokens": per_million(2.00),
+            "image_output_tokens": per_million(30.00),
+        },
         "gpt-image-1.5": {
             # Text tokens
             "input_tokens": per_million(5.00),
@@ -567,6 +576,16 @@ pricing = {
             "image_input_tokens": per_million(2.50),
             "image_cached_tokens": per_million(0.25),
             "image_output_tokens": per_million(8.00),
+        },
+        # Embeddings
+        "text-embedding-3-small": {
+            "input_tokens": per_million(0.02),
+        },
+        "text-embedding-3-large": {
+            "input_tokens": per_million(0.13),
+        },
+        "text-embedding-ada-002": {
+            "input_tokens": per_million(0.10),
         },
         # Video (Sora)
         "sora-2": {
