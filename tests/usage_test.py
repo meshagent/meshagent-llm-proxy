@@ -40,12 +40,21 @@ def test_extract_openai_completion_usage_falls_back_to_request_model() -> None:
     assert usage.tokens == {"input_tokens_flex": 10.0, "output_tokens_flex": 2.0}
 
 
-def test_extract_anthropic_completion_usage_falls_back_to_request_model() -> None:
+@pytest.mark.parametrize(
+    ("response_model", "request_model"),
+    [
+        ("claude-opus-4-6-20990101", "claude-opus-4-6"),
+        ("claude-opus-4-7-20990416", "claude-opus-4-7"),
+    ],
+)
+def test_extract_anthropic_completion_usage_falls_back_to_request_model(
+    response_model: str, request_model: str
+) -> None:
     usage = extract_anthropic_completion_usage(
-        model="claude-opus-4-6-20990101",
-        request={"model": "claude-opus-4-6"},
+        model=response_model,
+        request={"model": request_model},
         response={
-            "model": "claude-opus-4-6-20990101",
+            "model": response_model,
             "usage": {
                 "input_tokens": 10,
                 "output_tokens": 2,
@@ -57,7 +66,7 @@ def test_extract_anthropic_completion_usage_falls_back_to_request_model() -> Non
 
     assert usage is not None
     assert usage.provider == "anthropic"
-    assert usage.model == "claude-opus-4-6"
+    assert usage.model == request_model
     assert usage.tokens == {
         "input_tokens": 10.0,
         "output_tokens": 2.0,
