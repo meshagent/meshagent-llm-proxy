@@ -127,6 +127,10 @@ preprocessors = {
 }
 
 
+def _drop_zero_usage_values(tokens: dict[str, float]) -> dict[str, float]:
+    return {key: float(value) for key, value in tokens.items() if float(value) != 0.0}
+
+
 def is_pricing_available(
     *, provider: str, model: str, service_tier: str | None = None
 ) -> bool:
@@ -191,12 +195,15 @@ def preprocess(
             tokens=tokens,
             service_tier=service_tier,
         )
-        return _apply_openai_context_length_tier(
+        tokens = _apply_openai_context_length_tier(
             model=model,
             tokens=tier_tokens,
         )
+    filtered_tokens = _drop_zero_usage_values(tokens)
+    if len(filtered_tokens) == 0:
+        return None
 
-    return tokens
+    return filtered_tokens
 
 
 gpt_4_1_pricing = {

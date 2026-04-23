@@ -70,9 +70,45 @@ def test_extract_anthropic_completion_usage_falls_back_to_request_model(
     assert usage.tokens == {
         "input_tokens": 10.0,
         "output_tokens": 2.0,
-        "cache_creation_input_tokens": 0.0,
-        "cache_read_input_tokens": 0.0,
     }
+
+
+def test_extract_openai_completion_usage_drops_zero_reasoning_tokens() -> None:
+    usage = extract_openai_completion_usage(
+        model="gpt-5.4-2026-03-05",
+        request={"model": "gpt-5.4"},
+        response={
+            "model": "gpt-5.4-2026-03-05",
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 2,
+                "reasoning_tokens": 0,
+            },
+        },
+    )
+
+    assert usage is not None
+    assert usage.provider == "openai"
+    assert usage.model == "gpt-5.4-2026-03-05"
+    assert usage.tokens == {"input_tokens": 10.0, "output_tokens": 2.0}
+
+
+def test_extract_anthropic_completion_usage_returns_none_for_zero_only_usage() -> None:
+    usage = extract_anthropic_completion_usage(
+        model="claude-sonnet-4-6",
+        request={"model": "claude-sonnet-4-6"},
+        response={
+            "model": "claude-sonnet-4-6",
+            "usage": {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+            },
+        },
+    )
+
+    assert usage is None
 
 
 @pytest.mark.asyncio
