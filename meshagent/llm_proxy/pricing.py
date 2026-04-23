@@ -406,6 +406,24 @@ gpt_5_4_nano_pricing = {
     "output_tokens": per_million(1.25),
 }
 
+# Source: https://openai.com/index/introducing-gpt-5-5/
+# The release announcement publishes input/output pricing and tier multipliers.
+# Cached-input pricing follows the existing GPT-5 family pricing pattern.
+gpt_5_5_pricing = {
+    # Standard
+    "input_tokens": per_million(5.00),
+    "cached_tokens": per_million(0.50),
+    "output_tokens": per_million(30.00),
+    # Flex
+    "input_tokens_flex": per_million(2.50),
+    "cached_tokens_flex": per_million(0.25),
+    "output_tokens_flex": per_million(15.00),
+    # Priority
+    "input_tokens_priority": per_million(12.50),
+    "cached_tokens_priority": per_million(1.25),
+    "output_tokens_priority": per_million(75.00),
+}
+
 # Codex mini pricing.
 # Source: https://platform.openai.com/docs/pricing
 codex_mini_pricing = {
@@ -669,6 +687,7 @@ pricing = {
             "input_characters": per_million(30.00),
         },
         "gpt-5": gpt_5_pricing,
+        "gpt-5.5": gpt_5_5_pricing,
         "gpt-5.4": gpt_5_4_pricing,
         "gpt-5.4-2026-03-05": gpt_5_4_pricing,
         "gpt-5.4-mini": gpt_5_4_mini_pricing,
