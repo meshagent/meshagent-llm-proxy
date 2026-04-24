@@ -688,7 +688,7 @@ pricing = {
         },
         "gpt-5": gpt_5_pricing,
         "gpt-5.5": gpt_5_5_pricing,
-        "gpt-5.5-2026-04-23" : gpt_5_5_pricing,
+        "gpt-5.5-2026-04-23": gpt_5_5_pricing,
         "gpt-5.4": gpt_5_4_pricing,
         "gpt-5.4-2026-03-05": gpt_5_4_pricing,
         "gpt-5.4-mini": gpt_5_4_mini_pricing,
