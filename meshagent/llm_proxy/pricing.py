@@ -974,13 +974,19 @@ def build_usage_pricing_line_items(
 
     subtotal = 0.0
     for usage_type, total in usage.items():
-        unit_price = model_pricing.get(usage_type)
+        surcharge_only = usage_type.startswith("custom_")
+        priced_usage_type = (
+            usage_type.removeprefix("custom_") if surcharge_only else usage_type
+        )
+        unit_price = model_pricing.get(priced_usage_type)
         if unit_price is None:
             continue
 
         quantity = float(total)
         amount = quantity * float(unit_price)
         subtotal += amount
+        if surcharge_only:
+            continue
         line_items.append(
             UsagePricingLineItem(
                 type=usage_type,
