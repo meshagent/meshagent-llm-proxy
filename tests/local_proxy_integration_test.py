@@ -37,6 +37,34 @@ async def _start_test_server(
 
 
 @pytest.mark.asyncio
+async def test_local_proxy_start_closes_owned_session_when_site_start_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _upstream_token_provider() -> str:
+        return "meshagent-upstream-token"
+
+    async def _fail_start(self):
+        del self
+        raise OSError("site start failed")
+
+    monkeypatch.setattr(web.TCPSite, "start", _fail_start)
+
+    proxy_server = LocalLLMProxyServer(
+        api_base_url="https://example.test",
+        project_id="project-123",
+        upstream_bearer_token_provider=_upstream_token_provider,
+        host="127.0.0.1",
+        port=0,
+        bearer_token="local-proxy-bearer",
+    )
+
+    with pytest.raises(OSError, match="site start failed"):
+        await proxy_server.start()
+
+    assert proxy_server._http_session.closed is True
+
+
+@pytest.mark.asyncio
 async def test_local_proxy_live_forwards_openai_and_anthropic_requests() -> None:
     recorded_requests: list[_RecordedRequest] = []
 

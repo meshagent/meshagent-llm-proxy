@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import aiohttp
 from aiohttp import web
+from meshagent.api.http import new_client_session
 
 from meshagent.llm_proxy.providers import (
     is_anthropic_path_allowed,
@@ -194,7 +195,7 @@ class LocalLLMProxyServer:
         self._runner: web.AppRunner | None = None
         self._site: web.TCPSite | None = None
         self._owns_session = session is None
-        self._http_session = session or aiohttp.ClientSession()
+        self._http_session = session or new_client_session()
         self._bound_host = host
         self._bound_port = port
 
@@ -244,10 +245,22 @@ class LocalLLMProxyServer:
         if self._runner is not None:
             return
 
+        if self._owns_session and self._http_session.closed:
+            self._http_session = new_client_session()
+
         self._runner = web.AppRunner(self._app, access_log=None)
-        await self._runner.setup()
-        self._site = web.TCPSite(self._runner, self._host, self._port)
-        await self._site.start()
+        try:
+            await self._runner.setup()
+            self._site = web.TCPSite(self._runner, self._host, self._port)
+            await self._site.start()
+        except Exception:
+            if self._runner is not None:
+                await self._runner.cleanup()
+            self._runner = None
+            self._site = None
+            if self._owns_session and not self._http_session.closed:
+                await self._http_session.close()
+            raise
 
         if self._site._server is not None and self._site._server.sockets:
             socket = self._site._server.sockets[0]
@@ -262,7 +275,7 @@ class LocalLLMProxyServer:
             self._runner = None
             self._site = None
 
-        if self._owns_session:
+        if self._owns_session and not self._http_session.closed:
             await self._http_session.close()
 
     async def healthz(self, request: web.Request) -> web.Response:
