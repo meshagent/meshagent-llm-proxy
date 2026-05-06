@@ -24,6 +24,43 @@ def test_extract_openai_completion_usage_prefers_priced_response_model() -> None
     assert usage.tokens == {"input_tokens": 10.0, "output_tokens": 2.0}
 
 
+@pytest.mark.parametrize(
+    "response_usage",
+    [
+        {
+            "prompt_tokens": 5084,
+            "prompt_tokens_details": {"cached_tokens": 4864},
+            "completion_tokens": 2,
+            "total_tokens": 5086,
+        },
+        {
+            "input_tokens": 5084,
+            "input_tokens_details": {"cached_tokens": 4864},
+            "output_tokens": 2,
+            "total_tokens": 5086,
+        },
+    ],
+)
+def test_extract_openai_completion_usage_splits_cached_aggregate_input_tokens(
+    response_usage: dict,
+) -> None:
+    usage = extract_openai_completion_usage(
+        model="gpt-4.1",
+        request={"model": "gpt-4.1"},
+        response={"model": "gpt-4.1", "usage": response_usage},
+    )
+
+    assert usage is not None
+    assert usage.provider == "openai"
+    assert usage.model == "gpt-4.1"
+    assert usage.tokens == {
+        "cached_tokens": 4864.0,
+        "input_tokens": 220.0,
+        "output_tokens": 2.0,
+        "total_tokens": 5086.0,
+    }
+
+
 def test_extract_openai_completion_usage_falls_back_to_request_model() -> None:
     usage = extract_openai_completion_usage(
         model="gpt-5.4-2099-01-01",
@@ -70,6 +107,34 @@ def test_extract_anthropic_completion_usage_falls_back_to_request_model(
     assert usage.tokens == {
         "input_tokens": 10.0,
         "output_tokens": 2.0,
+    }
+
+
+def test_extract_anthropic_completion_usage_keeps_prompt_cache_tokens_separate() -> (
+    None
+):
+    usage = extract_anthropic_completion_usage(
+        model="claude-sonnet-4-6",
+        request={"model": "claude-sonnet-4-6"},
+        response={
+            "model": "claude-sonnet-4-6",
+            "usage": {
+                "input_tokens": 100,
+                "cache_creation_input_tokens": 1000,
+                "cache_read_input_tokens": 900,
+                "output_tokens": 5,
+            },
+        },
+    )
+
+    assert usage is not None
+    assert usage.provider == "anthropic"
+    assert usage.model == "claude-sonnet-4-6"
+    assert usage.tokens == {
+        "input_tokens": 100.0,
+        "cache_creation_input_tokens": 1000.0,
+        "cache_read_input_tokens": 900.0,
+        "output_tokens": 5.0,
     }
 
 
