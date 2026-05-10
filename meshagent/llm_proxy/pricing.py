@@ -117,9 +117,54 @@ def _apply_openai_service_tier(
 
 # Preprocessors are keyed by provider then model.
 # Use "*" for a provider/model default.
+def _to_float(value) -> float | None:
+    if value is None:
+        return None
+
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def preprocess_openai_audio_minutes_usage(
+    *, model: str, usage: dict
+) -> dict[str, float] | None:
+    del model
+
+    if not isinstance(usage, dict):
+        return None
+
+    audio_minutes = _to_float(usage.get("audio_minutes"))
+    if audio_minutes is not None:
+        return {"audio_minutes": audio_minutes}
+
+    audio_seconds = _to_float(usage.get("audio_seconds"))
+    if audio_seconds is None:
+        audio_seconds = _to_float(usage.get("duration_seconds"))
+    if audio_seconds is None:
+        audio_seconds = _to_float(usage.get("audio_duration_seconds"))
+
+    if audio_seconds is not None:
+        return {"audio_minutes": audio_seconds / 60.0}
+
+    audio_ms = _to_float(usage.get("audio_ms"))
+    if audio_ms is None:
+        audio_ms = _to_float(usage.get("duration_ms"))
+    if audio_ms is None:
+        audio_ms = _to_float(usage.get("audio_duration_ms"))
+
+    if audio_ms is not None:
+        return {"audio_minutes": audio_ms / 60000.0}
+
+    return preprocess_openai_usage(model="", usage=usage)
+
+
 preprocessors = {
     "openai": {
         "*": preprocess_openai_usage,
+        "gpt-realtime-translate": preprocess_openai_audio_minutes_usage,
+        "gpt-realtime-whisper": preprocess_openai_audio_minutes_usage,
     },
     "anthropic": {
         "*": preprocess_anthropic_usage,

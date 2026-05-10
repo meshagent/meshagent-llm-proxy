@@ -190,9 +190,20 @@ def extract_anthropic_completion_usage(
 def extract_openai_transcription_model_from_session(session_obj: object) -> str | None:
     if not isinstance(session_obj, dict):
         return None
+
     transcription = session_obj.get("input_audio_transcription")
     if not isinstance(transcription, dict):
+        audio_options = session_obj.get("audio")
+        if isinstance(audio_options, dict):
+            input_options = audio_options.get("input")
+            if isinstance(input_options, dict):
+                nested_transcription = input_options.get("transcription")
+                if isinstance(nested_transcription, dict):
+                    transcription = nested_transcription
+
+    if not isinstance(transcription, dict):
         return None
+
     model = transcription.get("model")
     if not isinstance(model, str):
         return None
