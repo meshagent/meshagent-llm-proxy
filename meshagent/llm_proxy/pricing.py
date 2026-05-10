@@ -458,6 +458,32 @@ gpt_nano_pricing = {
     "output_tokens_flex": per_million(0.20),
 }
 
+gpt_realtime_pricing = {
+    "input_tokens": per_million(4.00),
+    "cached_tokens": per_million(0.40),
+    "output_tokens": per_million(16.00),
+    "audio_input_tokens": per_million(32.00),
+    "audio_cached_tokens": per_million(0.40),
+    "audio_output_tokens": per_million(64.00),
+    "image_input_tokens": per_million(5.00),
+    "image_cached_tokens": per_million(0.50),
+}
+
+gpt_realtime_2_pricing = {
+    # Text tokens
+    "input_tokens": per_million(4.00),
+    "cached_tokens": per_million(0.40),
+    "output_tokens": per_million(24.00),
+    "reasoning_tokens": per_million(24.00),
+    # Audio tokens
+    "audio_input_tokens": per_million(32.00),
+    "audio_cached_tokens": per_million(0.40),
+    "audio_output_tokens": per_million(64.00),
+    # Image tokens
+    "image_input_tokens": per_million(5.00),
+    "image_cached_tokens": per_million(0.50),
+}
+
 # Anthropic pricing (Claude API).
 # Source: https://platform.claude.com/docs/en/about-claude/pricing
 # Notes:
@@ -635,16 +661,8 @@ pricing = {
             "audio_input_tokens": per_million(10.00),
             "audio_output_tokens": per_million(20.00),
         },
-        "gpt-realtime": {
-            "input_tokens": per_million(4.00),
-            "cached_tokens": per_million(0.40),
-            "output_tokens": per_million(16.00),
-            "audio_input_tokens": per_million(32.00),
-            "audio_cached_tokens": per_million(0.40),
-            "audio_output_tokens": per_million(64.00),
-            "image_input_tokens": per_million(5.00),
-            "image_cached_tokens": per_million(0.50),
-        },
+        "gpt-realtime": gpt_realtime_pricing,
+        "gpt-realtime-1.5": gpt_realtime_pricing,
         "gpt-realtime-mini": {
             "input_tokens": per_million(0.60),
             "cached_tokens": per_million(0.06),
@@ -654,6 +672,15 @@ pricing = {
             "audio_output_tokens": per_million(20.00),
             "image_input_tokens": per_million(0.80),
             "image_cached_tokens": per_million(0.08),
+        },
+        # Realtime 2
+        # Source: https://openai.com/api/pricing/
+        "gpt-realtime-2": gpt_realtime_2_pricing,
+        "gpt-realtime-translate": {
+            "audio_minutes": 0.034,
+        },
+        "gpt-realtime-whisper": {
+            "audio_minutes": 0.017,
         },
         # Speech / transcription (STT + TTS)
         # Source: https://platform.openai.com/docs/pricing
