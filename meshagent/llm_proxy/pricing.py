@@ -459,6 +459,10 @@ gpt_5_5_pricing = {
     "input_tokens": per_million(5.00),
     "cached_tokens": per_million(0.50),
     "output_tokens": per_million(30.00),
+    # Image generation tool tokens use the default GPT Image 2 pricing.
+    "image_input_tokens": per_million(8.00),
+    "image_cached_tokens": per_million(2.00),
+    "image_output_tokens": per_million(30.00),
     # Flex
     "input_tokens_flex": per_million(2.50),
     "cached_tokens_flex": per_million(0.25),
