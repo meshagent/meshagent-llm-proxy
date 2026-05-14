@@ -544,11 +544,6 @@ claude_opus_4_6_pricing = {
     "cache_creation_input_tokens": per_million(6.25),
     "cache_read_input_tokens": per_million(0.50),
     "output_tokens": per_million(25.00),
-    # Long-context pricing (> 200K total input tokens)
-    "input_tokens_long": per_million(10.00),
-    "cache_creation_input_tokens_long": per_million(12.50),
-    "cache_read_input_tokens_long": per_million(1.00),
-    "output_tokens_long": per_million(37.50),
 }
 
 claude_opus_4_7_pricing = claude_opus_4_6_pricing
@@ -574,16 +569,10 @@ claude_sonnet_4_5_pricing = {
 }
 
 claude_sonnet_4_6_pricing = {
-    # Standard pricing (<= 200K total input tokens)
     "input_tokens": per_million(3.00),
     "cache_creation_input_tokens": per_million(3.75),
     "cache_read_input_tokens": per_million(0.30),
     "output_tokens": per_million(15.00),
-    # Long-context pricing (> 200K total input tokens)
-    "input_tokens_long": per_million(6.00),
-    "cache_creation_input_tokens_long": per_million(7.50),
-    "cache_read_input_tokens_long": per_million(0.60),
-    "output_tokens_long": per_million(22.50),
 }
 
 claude_haiku_4_5_pricing = {
