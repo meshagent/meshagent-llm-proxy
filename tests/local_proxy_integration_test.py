@@ -306,6 +306,174 @@ async def test_websocket_proxy_idle_connection_survives_low_heartbeats() -> None
 
 
 @pytest.mark.asyncio
+async def test_browser_facing_websocket_responds_to_server_heartbeat() -> None:
+    heartbeat = 0.2
+    app = web.Application()
+    server_ready = asyncio.Event()
+
+    async def _handle_websocket(request: web.Request) -> web.StreamResponse:
+        websocket = web.WebSocketResponse(heartbeat=heartbeat)
+        await websocket.prepare(request)
+        server_ready.set()
+        async for msg in websocket:
+            if msg.type == aiohttp.WSMsgType.TEXT:
+                await websocket.send_str(msg.data)
+        return websocket
+
+    app.router.add_get("/messages", _handle_websocket)
+    runner, _site, base_url = await _start_test_server(app)
+
+    try:
+        async with aiohttp.ClientSession() as client_session:
+            async with client_session.ws_connect(
+                f"{base_url.replace('http', 'ws')}/messages"
+            ) as websocket:
+                received: asyncio.Queue[aiohttp.WSMessage] = asyncio.Queue()
+
+                async def _receive_messages() -> None:
+                    async for message in websocket:
+                        await received.put(message)
+
+                receive_task = asyncio.create_task(_receive_messages())
+                await asyncio.wait_for(server_ready.wait(), timeout=1.0)
+                await asyncio.sleep(heartbeat * 4)
+                assert not websocket.closed
+
+                await websocket.send_str("browser-hop")
+                message = await asyncio.wait_for(received.get(), timeout=1.0)
+                assert message.type == aiohttp.WSMsgType.TEXT
+                assert message.data == "browser-hop"
+                receive_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await receive_task
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_router_to_room_pod_websocket_responds_to_client_heartbeat() -> None:
+    heartbeat = 0.2
+    room_pod_app = web.Application()
+    room_pod_ready = asyncio.Event()
+
+    async def _handle_room_pod_websocket(request: web.Request) -> web.StreamResponse:
+        websocket = web.WebSocketResponse()
+        await websocket.prepare(request)
+        room_pod_ready.set()
+        async for msg in websocket:
+            if msg.type == aiohttp.WSMsgType.TEXT:
+                await websocket.send_str(msg.data)
+        return websocket
+
+    room_pod_app.router.add_get("/rooms/test-room", _handle_room_pod_websocket)
+    runner, _site, base_url = await _start_test_server(room_pod_app)
+
+    try:
+        async with aiohttp.ClientSession() as router_session:
+            async with router_session.ws_connect(
+                f"{base_url.replace('http', 'ws')}/rooms/test-room",
+                heartbeat=heartbeat,
+            ) as websocket:
+                received: asyncio.Queue[aiohttp.WSMessage] = asyncio.Queue()
+
+                async def _receive_messages() -> None:
+                    async for message in websocket:
+                        await received.put(message)
+
+                receive_task = asyncio.create_task(_receive_messages())
+                await asyncio.wait_for(room_pod_ready.wait(), timeout=1.0)
+                await asyncio.sleep(heartbeat * 4)
+                assert not websocket.closed
+
+                await websocket.send_str("room-pod-hop")
+                message = await asyncio.wait_for(received.get(), timeout=1.0)
+                assert message.type == aiohttp.WSMsgType.TEXT
+                assert message.data == "room-pod-hop"
+                receive_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await receive_task
+    finally:
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_room_pod_to_container_proxy_responds_to_proxy_heartbeats() -> None:
+    heartbeat = 0.2
+    outcomes: list[ProxyWebSocketOutcome] = []
+    container_ready = asyncio.Event()
+    container_app = web.Application()
+    room_pod_proxy_app = web.Application()
+
+    async def _handle_container_websocket(request: web.Request) -> web.StreamResponse:
+        websocket = web.WebSocketResponse()
+        await websocket.prepare(request)
+        container_ready.set()
+        async for msg in websocket:
+            if msg.type == aiohttp.WSMsgType.TEXT:
+                await websocket.send_str(msg.data)
+            elif msg.type == aiohttp.WSMsgType.BINARY:
+                await websocket.send_bytes(msg.data)
+        return websocket
+
+    container_app.router.add_get("/messages", _handle_container_websocket)
+    container_runner, _container_site, container_base_url = await _start_test_server(
+        container_app
+    )
+    room_pod_session = aiohttp.ClientSession()
+
+    async def _record_outcome(outcome: ProxyWebSocketOutcome) -> None:
+        outcomes.append(outcome)
+
+    async def _handle_room_pod_proxy(request: web.Request) -> web.StreamResponse:
+        return await proxy_websocket_request(
+            request=request,
+            http_session=room_pod_session,
+            upstream_http_url=f"{container_base_url}/messages",
+            heartbeat=heartbeat,
+            upstream_headers={},
+            on_complete=_record_outcome,
+        )
+
+    room_pod_proxy_app.router.add_get(
+        "/tunnel/container-1/3001/messages", _handle_room_pod_proxy
+    )
+    proxy_runner, _proxy_site, proxy_base_url = await _start_test_server(
+        room_pod_proxy_app
+    )
+
+    try:
+        async with aiohttp.ClientSession() as browser_session:
+            async with browser_session.ws_connect(
+                f"{proxy_base_url.replace('http', 'ws')}"
+                "/tunnel/container-1/3001/messages"
+            ) as websocket:
+                received: asyncio.Queue[aiohttp.WSMessage] = asyncio.Queue()
+
+                async def _receive_messages() -> None:
+                    async for message in websocket:
+                        await received.put(message)
+
+                receive_task = asyncio.create_task(_receive_messages())
+                await asyncio.wait_for(container_ready.wait(), timeout=1.0)
+                await asyncio.sleep(heartbeat * 4)
+                assert not websocket.closed
+
+                await websocket.send_str("container-hop")
+                message = await asyncio.wait_for(received.get(), timeout=1.0)
+                assert message.type == aiohttp.WSMsgType.TEXT
+                assert message.data == "container-hop"
+                receive_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await receive_task
+    finally:
+        await room_pod_session.close()
+        await proxy_runner.cleanup()
+        await container_runner.cleanup()
+
+    assert outcomes == [] or outcomes[-1].error is None
+
+
+@pytest.mark.asyncio
 async def test_chained_websocket_proxies_idle_connection_survives_low_heartbeats() -> (
     None
 ):
