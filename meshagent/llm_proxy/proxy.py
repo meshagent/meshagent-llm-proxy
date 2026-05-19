@@ -64,6 +64,9 @@ class ProxyWebSocketOutcome:
     client_close_code: int | None
     upstream_close_code: int | None
     error: str | None
+    completed_side: str | None = None
+    client_exception: str | None = None
+    upstream_exception: str | None = None
 
 
 def filter_proxied_response_headers(
@@ -201,10 +204,15 @@ async def proxy_websocket_request(
                 _pump_ws(upstream_ws, client_ws, on_upstream_event)
             )
 
-            _, pending = await asyncio.wait(
+            done, pending = await asyncio.wait(
                 {client_task, upstream_task},
                 return_when=asyncio.FIRST_COMPLETED,
             )
+            completed_sides: list[str] = []
+            if client_task in done:
+                completed_sides.append("client")
+            if upstream_task in done:
+                completed_sides.append("upstream")
 
             for task in pending:
                 task.cancel()
@@ -214,6 +222,13 @@ async def proxy_websocket_request(
                 client_close_code=client_ws.close_code,
                 upstream_close_code=upstream_ws.close_code,
                 error=None,
+                completed_side=",".join(completed_sides) or None,
+                client_exception=str(client_ws.exception())
+                if client_ws.exception() is not None
+                else None,
+                upstream_exception=str(upstream_ws.exception())
+                if upstream_ws.exception() is not None
+                else None,
             )
 
     except aiohttp.WSServerHandshakeError as ex:

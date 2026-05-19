@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 from typing import Any, TypedDict
 
@@ -12,6 +14,10 @@ from openai import AsyncOpenAI
 from meshagent.llm_proxy.local_proxy import (
     LocalLLMProxyServer,
     MESHAGENT_PROJECT_ID_HEADER,
+)
+from meshagent.llm_proxy.proxy import (
+    ProxyWebSocketOutcome,
+    proxy_websocket_request,
 )
 
 
@@ -225,6 +231,181 @@ async def test_local_proxy_live_forwards_openai_and_anthropic_requests() -> None
     assert request_activity_by_provider["anthropic"].status == 200
     assert request_activity_by_provider["anthropic"].path == "/anthropic/v1/messages"
     assert request_activity_by_provider["anthropic"].total is not None
+
+
+@pytest.mark.asyncio
+async def test_websocket_proxy_idle_connection_survives_low_heartbeats() -> None:
+    heartbeat = 0.5
+    outcomes: list[ProxyWebSocketOutcome] = []
+    upstream_ready = asyncio.Event()
+    proxy_app = web.Application()
+    upstream_app = web.Application()
+
+    async def _handle_upstream_websocket(request: web.Request) -> web.StreamResponse:
+        websocket = web.WebSocketResponse(heartbeat=heartbeat)
+        await websocket.prepare(request)
+        upstream_ready.set()
+        async for msg in websocket:
+            if msg.type == aiohttp.WSMsgType.TEXT:
+                await websocket.send_str(msg.data)
+            elif msg.type == aiohttp.WSMsgType.BINARY:
+                await websocket.send_bytes(msg.data)
+        return websocket
+
+    upstream_app.router.add_get("/messages", _handle_upstream_websocket)
+    upstream_runner, _upstream_site, upstream_base_url = await _start_test_server(
+        upstream_app
+    )
+    proxy_session = aiohttp.ClientSession()
+
+    async def _record_outcome(outcome: ProxyWebSocketOutcome) -> None:
+        outcomes.append(outcome)
+
+    async def _handle_proxy_websocket(request: web.Request) -> web.StreamResponse:
+        return await proxy_websocket_request(
+            request=request,
+            http_session=proxy_session,
+            upstream_http_url=f"{upstream_base_url}/messages",
+            heartbeat=heartbeat,
+            upstream_headers={},
+            on_complete=_record_outcome,
+        )
+
+    proxy_app.router.add_get("/messages", _handle_proxy_websocket)
+    proxy_runner, _proxy_site, proxy_base_url = await _start_test_server(proxy_app)
+
+    try:
+        async with aiohttp.ClientSession() as client_session:
+            async with client_session.ws_connect(
+                f"{proxy_base_url.replace('http', 'ws')}/messages",
+            ) as websocket:
+                received: asyncio.Queue[aiohttp.WSMessage] = asyncio.Queue()
+
+                async def _receive_messages() -> None:
+                    async for message in websocket:
+                        await received.put(message)
+
+                receive_task = asyncio.create_task(_receive_messages())
+                await asyncio.wait_for(upstream_ready.wait(), timeout=1.0)
+                await asyncio.sleep(heartbeat * 4)
+                assert not websocket.closed
+
+                await websocket.send_str("still here")
+                message = await asyncio.wait_for(received.get(), timeout=1.0)
+                assert message.type == aiohttp.WSMsgType.TEXT
+                assert message.data == "still here"
+                receive_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await receive_task
+    finally:
+        await proxy_session.close()
+        await proxy_runner.cleanup()
+        await upstream_runner.cleanup()
+
+    assert outcomes == [] or outcomes[-1].error is None
+
+
+@pytest.mark.asyncio
+async def test_chained_websocket_proxies_idle_connection_survives_low_heartbeats() -> (
+    None
+):
+    heartbeat = 0.5
+    outcomes: list[tuple[str, ProxyWebSocketOutcome]] = []
+    upstream_ready = asyncio.Event()
+    upstream_app = web.Application()
+    inner_proxy_app = web.Application()
+    outer_proxy_app = web.Application()
+
+    async def _handle_upstream_websocket(request: web.Request) -> web.StreamResponse:
+        websocket = web.WebSocketResponse(heartbeat=heartbeat)
+        await websocket.prepare(request)
+        upstream_ready.set()
+        async for msg in websocket:
+            if msg.type == aiohttp.WSMsgType.TEXT:
+                await websocket.send_str(msg.data)
+            elif msg.type == aiohttp.WSMsgType.BINARY:
+                await websocket.send_bytes(msg.data)
+        return websocket
+
+    upstream_app.router.add_get("/messages", _handle_upstream_websocket)
+    upstream_runner, _upstream_site, upstream_base_url = await _start_test_server(
+        upstream_app
+    )
+
+    inner_session = aiohttp.ClientSession()
+    outer_session = aiohttp.ClientSession()
+
+    async def _record_inner_outcome(outcome: ProxyWebSocketOutcome) -> None:
+        outcomes.append(("inner", outcome))
+
+    async def _record_outer_outcome(outcome: ProxyWebSocketOutcome) -> None:
+        outcomes.append(("outer", outcome))
+
+    async def _handle_inner_proxy(request: web.Request) -> web.StreamResponse:
+        return await proxy_websocket_request(
+            request=request,
+            http_session=inner_session,
+            upstream_http_url=f"{upstream_base_url}/messages",
+            heartbeat=heartbeat,
+            upstream_headers={},
+            on_complete=_record_inner_outcome,
+        )
+
+    inner_proxy_app.router.add_get(
+        "/projects/project/rooms/room/ports/3001/messages", _handle_inner_proxy
+    )
+    inner_runner, _inner_site, inner_base_url = await _start_test_server(
+        inner_proxy_app
+    )
+
+    async def _handle_outer_proxy(request: web.Request) -> web.StreamResponse:
+        return await proxy_websocket_request(
+            request=request,
+            http_session=outer_session,
+            upstream_http_url=(
+                f"{inner_base_url}/projects/project/rooms/room/ports/3001/messages"
+            ),
+            heartbeat=heartbeat,
+            upstream_headers={},
+            on_complete=_record_outer_outcome,
+        )
+
+    outer_proxy_app.router.add_get("/messages", _handle_outer_proxy)
+    outer_runner, _outer_site, outer_base_url = await _start_test_server(
+        outer_proxy_app
+    )
+
+    try:
+        async with aiohttp.ClientSession() as client_session:
+            async with client_session.ws_connect(
+                f"{outer_base_url.replace('http', 'ws')}/messages",
+            ) as websocket:
+                received: asyncio.Queue[aiohttp.WSMessage] = asyncio.Queue()
+
+                async def _receive_messages() -> None:
+                    async for message in websocket:
+                        await received.put(message)
+
+                receive_task = asyncio.create_task(_receive_messages())
+                await asyncio.wait_for(upstream_ready.wait(), timeout=1.0)
+                await asyncio.sleep(heartbeat * 4)
+                assert not websocket.closed
+
+                await websocket.send_str("still here")
+                message = await asyncio.wait_for(received.get(), timeout=1.0)
+                assert message.type == aiohttp.WSMsgType.TEXT
+                assert message.data == "still here"
+                receive_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await receive_task
+    finally:
+        await outer_session.close()
+        await inner_session.close()
+        await outer_runner.cleanup()
+        await inner_runner.cleanup()
+        await upstream_runner.cleanup()
+
+    assert all(outcome.error is None for _, outcome in outcomes)
 
 
 @pytest.mark.asyncio
