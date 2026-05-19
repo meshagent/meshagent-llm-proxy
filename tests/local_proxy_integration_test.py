@@ -306,6 +306,74 @@ async def test_websocket_proxy_idle_connection_survives_low_heartbeats() -> None
 
 
 @pytest.mark.asyncio
+async def test_websocket_proxy_does_not_watchdog_close_upstream_that_does_not_read() -> (
+    None
+):
+    heartbeat = 0.2
+    outcomes: list[ProxyWebSocketOutcome] = []
+    upstream_ready = asyncio.Event()
+    upstream_release = asyncio.Event()
+    proxy_app = web.Application()
+    upstream_app = web.Application()
+
+    async def _handle_upstream_websocket(request: web.Request) -> web.StreamResponse:
+        websocket = web.WebSocketResponse()
+        await websocket.prepare(request)
+        upstream_ready.set()
+        await upstream_release.wait()
+        return websocket
+
+    upstream_app.router.add_get("/messages", _handle_upstream_websocket)
+    upstream_runner, _upstream_site, upstream_base_url = await _start_test_server(
+        upstream_app
+    )
+    proxy_session = aiohttp.ClientSession()
+
+    async def _record_outcome(outcome: ProxyWebSocketOutcome) -> None:
+        outcomes.append(outcome)
+
+    async def _handle_proxy_websocket(request: web.Request) -> web.StreamResponse:
+        return await proxy_websocket_request(
+            request=request,
+            http_session=proxy_session,
+            upstream_http_url=f"{upstream_base_url}/messages",
+            heartbeat=heartbeat,
+            upstream_headers={},
+            on_complete=_record_outcome,
+        )
+
+    proxy_app.router.add_get("/messages", _handle_proxy_websocket)
+    proxy_runner, _proxy_site, proxy_base_url = await _start_test_server(proxy_app)
+
+    try:
+        async with aiohttp.ClientSession() as client_session:
+            async with client_session.ws_connect(
+                f"{proxy_base_url.replace('http', 'ws')}/messages",
+            ) as websocket:
+                received: asyncio.Queue[aiohttp.WSMessage] = asyncio.Queue()
+
+                async def _receive_messages() -> None:
+                    async for message in websocket:
+                        await received.put(message)
+
+                receive_task = asyncio.create_task(_receive_messages())
+                try:
+                    await asyncio.wait_for(upstream_ready.wait(), timeout=1.0)
+                    await asyncio.sleep(heartbeat * 4)
+                    assert not websocket.closed
+                    assert outcomes == []
+                finally:
+                    receive_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await receive_task
+    finally:
+        upstream_release.set()
+        await proxy_session.close()
+        await proxy_runner.cleanup()
+        await upstream_runner.cleanup()
+
+
+@pytest.mark.asyncio
 async def test_browser_facing_websocket_responds_to_server_heartbeat() -> None:
     heartbeat = 0.2
     app = web.Application()

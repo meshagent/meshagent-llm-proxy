@@ -168,9 +168,11 @@ async def proxy_websocket_request(
         else None
     )
 
+    # Do not pass heartbeat through here. aiohttp's heartbeat is a fatal pong
+    # watchdog, and this helper proxies arbitrary tunneled app websockets whose
+    # liveness policy belongs to the application/client protocol.
     client_ws = web.WebSocketResponse(
         autoping=True,
-        heartbeat=heartbeat,
         max_msg_size=0,
         protocols=client_protocols,
     )
@@ -194,7 +196,6 @@ async def proxy_websocket_request(
             },
             protocols=protocol_list,
             autoping=True,
-            heartbeat=heartbeat,
             max_msg_size=0,
         ) as upstream_ws:
             client_task = asyncio.create_task(
