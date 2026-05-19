@@ -152,15 +152,27 @@ async def proxy_websocket_request(
             elif msg.type == aiohttp.WSMsgType.ERROR:
                 return
 
+    protocols = request.headers.get("Sec-WebSocket-Protocol")
+    protocol_list = [p.strip() for p in protocols.split(",")] if protocols else None
+    client_protocols = (
+        [
+            protocol
+            for protocol in protocol_list
+            if not protocol.startswith("meshagent-token.")
+            and not protocol.startswith("bearer.")
+        ]
+        if protocol_list is not None
+        else None
+    )
+
     client_ws = web.WebSocketResponse(
         autoping=True,
         heartbeat=heartbeat,
         max_msg_size=0,
+        protocols=client_protocols,
     )
     await client_ws.prepare(request)
 
-    protocols = request.headers.get("Sec-WebSocket-Protocol")
-    protocol_list = [p.strip() for p in protocols.split(",")] if protocols else None
     upstream_ws_url = http_to_websocket_url(upstream_http_url)
     outcome = ProxyWebSocketOutcome(
         status=None,
