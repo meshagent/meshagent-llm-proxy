@@ -10,8 +10,8 @@ license = "Apache-2.0"
 keywords = []
 dependencies = [
   "aiohttp[speedups]~=3.13.0",
-  "meshagent-anthropic==0.41.10",
-  "meshagent-openai==0.41.10",
+  "meshagent-anthropic==0.42.0",
+  "meshagent-openai==0.42.0",
 ]
 dynamic = ["version", "readme"]
 
