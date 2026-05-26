@@ -161,7 +161,8 @@ async def proxy_websocket_request(
         [
             protocol
             for protocol in protocol_list
-            if not protocol.startswith("meshagent-token.")
+            if not protocol.startswith("meshagent-agent.")
+            and not protocol.startswith("meshagent-token.")
             and not protocol.startswith("bearer.")
         ]
         if protocol_list is not None
