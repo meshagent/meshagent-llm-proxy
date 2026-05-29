@@ -84,6 +84,7 @@ def test_extract_openai_completion_usage_falls_back_to_request_model() -> None:
     [
         ("claude-opus-4-6-20990101", "claude-opus-4-6"),
         ("claude-opus-4-7-20990416", "claude-opus-4-7"),
+        ("claude-opus-4-8-20990528", "claude-opus-4-8"),
     ],
 )
 def test_extract_anthropic_completion_usage_falls_back_to_request_model(
