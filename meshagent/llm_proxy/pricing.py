@@ -165,6 +165,7 @@ preprocessors = {
         "*": preprocess_openai_usage,
         "gpt-realtime-translate": preprocess_openai_audio_minutes_usage,
         "gpt-realtime-whisper": preprocess_openai_audio_minutes_usage,
+        "whisper-1": preprocess_openai_audio_minutes_usage,
     },
     "anthropic": {
         "*": preprocess_anthropic_usage,
@@ -731,17 +732,17 @@ pricing = {
         "gpt-4o-transcribe": {
             "input_tokens": per_million(2.50),
             "output_tokens": per_million(10.00),
-            "audio_input_tokens": per_million(6.00),
+            "audio_input_tokens": per_million(2.50),
         },
         "gpt-4o-transcribe-diarize": {
             "input_tokens": per_million(2.50),
             "output_tokens": per_million(10.00),
-            "audio_input_tokens": per_million(6.00),
+            "audio_input_tokens": per_million(2.50),
         },
         "gpt-4o-mini-transcribe": {
             "input_tokens": per_million(1.25),
             "output_tokens": per_million(5.00),
-            "audio_input_tokens": per_million(3.00),
+            "audio_input_tokens": per_million(1.25),
         },
         # Legacy speech models
         "whisper-1": {

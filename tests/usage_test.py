@@ -1,6 +1,7 @@
 import pytest
 
 from meshagent.llm_proxy.local_proxy import build_local_proxy_env
+from meshagent.llm_proxy.pricing import build_usage_pricing_line_items, preprocess
 from meshagent.llm_proxy.usage import (
     UsageCollector,
     extract_anthropic_completion_usage,
@@ -61,6 +62,39 @@ def test_extract_openai_completion_usage_splits_cached_aggregate_input_tokens(
         "output_tokens": 2.0,
         "total_tokens": 5086.0,
     }
+
+
+@pytest.mark.parametrize(
+    "response_usage",
+    [
+        {
+            "input_tokens": 10,
+            "output_tokens": 12,
+            "output_tokens_details": {"reasoning_tokens": 7},
+        },
+        {
+            "prompt_tokens": 10,
+            "completion_tokens": 12,
+            "completion_tokens_details": {"reasoning_tokens": 7},
+        },
+    ],
+)
+def test_extract_openai_completion_usage_does_not_double_count_reasoning_tokens(
+    response_usage: dict,
+) -> None:
+    usage = extract_openai_completion_usage(
+        model="gpt-5.4-2026-03-05",
+        request={"model": "gpt-5.4"},
+        response={
+            "model": "gpt-5.4-2026-03-05",
+            "usage": response_usage,
+        },
+    )
+
+    assert usage is not None
+    assert usage.provider == "openai"
+    assert usage.model == "gpt-5.4-2026-03-05"
+    assert usage.tokens == {"input_tokens": 10.0, "output_tokens": 12.0}
 
 
 def test_extract_openai_completion_usage_falls_back_to_request_model() -> None:
@@ -201,6 +235,27 @@ async def test_usage_collector_prices_realtime_whisper_audio_minutes() -> None:
 
     assert snapshot.subtotal == pytest.approx(0.034)
     assert snapshot.surcharge == pytest.approx(0.0017)
+
+
+def test_pricing_preprocesses_whisper_audio_duration() -> None:
+    tokens = preprocess(
+        provider="openai",
+        model="whisper-1",
+        usage={"duration_seconds": 90},
+    )
+
+    assert tokens == {"audio_minutes": 1.5}
+
+    line_items = build_usage_pricing_line_items(
+        provider="openai",
+        model="whisper-1",
+        usage=tokens or {},
+        surcharge_rate=0.0,
+    )
+
+    audio_items = [item for item in line_items if item.type == "audio_minutes"]
+    assert len(audio_items) == 1
+    assert audio_items[0].amount == pytest.approx(0.009)
 
 
 def test_extract_anthropic_completion_usage_returns_none_for_zero_only_usage() -> None:
