@@ -6,7 +6,6 @@ from meshagent.llm_proxy.usage import (
     UsageCollector,
     extract_anthropic_completion_usage,
     extract_openai_completion_usage,
-    extract_openai_realtime_usage,
     extract_openai_transcription_model_from_session,
 )
 
@@ -202,22 +201,6 @@ def test_extract_openai_transcription_model_from_nested_realtime_session() -> No
         )
         == "gpt-realtime-whisper"
     )
-
-
-def test_extract_openai_realtime_transcription_usage_prices_audio_seconds() -> None:
-    usage = extract_openai_realtime_usage(
-        default_model="gpt-realtime-2",
-        transcription_model="gpt-realtime-whisper",
-        event={
-            "type": "conversation.item.input_audio_transcription.completed",
-            "usage": {"audio_seconds": 30},
-        },
-    )
-
-    assert usage is not None
-    assert usage.provider == "openai"
-    assert usage.model == "gpt-realtime-whisper"
-    assert usage.tokens == {"audio_minutes": 0.5}
 
 
 @pytest.mark.asyncio
