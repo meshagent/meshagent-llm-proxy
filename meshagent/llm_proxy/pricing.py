@@ -578,6 +578,14 @@ claude_sonnet_4_6_pricing = {
     "output_tokens": per_million(15.00),
 }
 
+# Introductory pricing through August 31, 2026.
+claude_sonnet_5_pricing = {
+    "input_tokens": per_million(2.00),
+    "cache_creation_input_tokens": per_million(2.50),
+    "cache_read_input_tokens": per_million(0.20),
+    "output_tokens": per_million(10.00),
+}
+
 claude_haiku_4_5_pricing = {
     "input_tokens": per_million(1.00),
     "cache_creation_input_tokens": per_million(1.25),
@@ -716,6 +724,7 @@ pricing = {
         },
         # Realtime 2
         # Source: https://openai.com/api/pricing/
+        "gpt-realtime-2.1": gpt_realtime_2_pricing,
         "gpt-realtime-2": gpt_realtime_2_pricing,
         "gpt-realtime-translate": {
             "audio_minutes": 0.034,
@@ -881,6 +890,7 @@ pricing = {
         "claude-opus-4-7": claude_opus_4_7_pricing,
         "claude-opus-4-6": claude_opus_4_6_pricing,
         "claude-opus-4-5": claude_opus_4_5_pricing,
+        "claude-sonnet-5": claude_sonnet_5_pricing,
         "claude-sonnet-4-6": claude_sonnet_4_6_pricing,
         "claude-sonnet-4-5": claude_sonnet_4_5_pricing,
         "claude-haiku-4-5": claude_haiku_4_5_pricing,
