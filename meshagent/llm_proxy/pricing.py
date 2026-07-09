@@ -474,6 +474,26 @@ gpt_5_5_pricing = {
     "output_tokens_priority": per_million(75.00),
 }
 
+
+# Source: https://openai.com/index/gpt-5-6/
+# Cache reads cost 10% of uncached input; cache writes cost 125%.
+def gpt_5_6_pricing(*, input_price: float, output_price: float):
+    return {
+        "input_tokens": per_million(input_price),
+        "cached_tokens": per_million(input_price * 0.10),
+        "cache_write_tokens": per_million(input_price * 1.25),
+        "output_tokens": per_million(output_price),
+        # Image generation tool tokens use the default GPT Image 2 pricing.
+        "image_input_tokens": per_million(8.00),
+        "image_cached_tokens": per_million(2.00),
+        "image_output_tokens": per_million(30.00),
+    }
+
+
+gpt_5_6_sol_pricing = gpt_5_6_pricing(input_price=5.00, output_price=30.00)
+gpt_5_6_terra_pricing = gpt_5_6_pricing(input_price=2.50, output_price=15.00)
+gpt_5_6_luna_pricing = gpt_5_6_pricing(input_price=1.00, output_price=6.00)
+
 # Codex mini pricing.
 # Source: https://platform.openai.com/docs/pricing
 codex_mini_pricing = {
@@ -764,6 +784,10 @@ pricing = {
             "input_characters": per_million(30.00),
         },
         "gpt-5": gpt_5_pricing,
+        "gpt-5.6": gpt_5_6_sol_pricing,
+        "gpt-5.6-sol": gpt_5_6_sol_pricing,
+        "gpt-5.6-terra": gpt_5_6_terra_pricing,
+        "gpt-5.6-luna": gpt_5_6_luna_pricing,
         "gpt-5.5": gpt_5_5_pricing,
         "gpt-5.5-2026-04-23": gpt_5_5_pricing,
         "gpt-5.4": gpt_5_4_pricing,
