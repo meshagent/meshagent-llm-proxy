@@ -37,13 +37,21 @@ OPENAI_LONG_CONTEXT_THRESHOLDS = {
     # Context-length pricing starts at 272K input tokens.
     "gpt-5.4": 272000,
     "gpt-5.4-2026-03-05": 272000,
+    "gpt-5.6": 272000,
+    "gpt-5.6-sol": 272000,
+    "gpt-5.6-terra": 272000,
+    "gpt-5.6-luna": 272000,
 }
 
 
 def _openai_input_tokens_for_context_pricing(tokens: dict[str, float]) -> float:
     total = 0.0
     for key, value in tokens.items():
-        if key.startswith("input_tokens") or key.startswith("cached_tokens"):
+        if (
+            key.startswith("input_tokens")
+            or key.startswith("cached_tokens")
+            or key.startswith("cache_write_tokens")
+        ):
             total += float(value)
     return total
 
@@ -479,10 +487,31 @@ gpt_5_5_pricing = {
 # Cache reads cost 10% of uncached input; cache writes cost 125%.
 def gpt_5_6_pricing(*, input_price: float, output_price: float):
     return {
+        # Standard, short context.
         "input_tokens": per_million(input_price),
         "cached_tokens": per_million(input_price * 0.10),
         "cache_write_tokens": per_million(input_price * 1.25),
         "output_tokens": per_million(output_price),
+        # Flex, short context.
+        "input_tokens_flex": per_million(input_price * 0.50),
+        "cached_tokens_flex": per_million(input_price * 0.05),
+        "cache_write_tokens_flex": per_million(input_price * 0.625),
+        "output_tokens_flex": per_million(output_price * 0.50),
+        # Priority is available for short-context requests only.
+        "input_tokens_priority": per_million(input_price * 2.00),
+        "cached_tokens_priority": per_million(input_price * 0.20),
+        "cache_write_tokens_priority": per_million(input_price * 2.50),
+        "output_tokens_priority": per_million(output_price * 2.00),
+        # Standard, long context.
+        "input_tokens_long": per_million(input_price * 2.00),
+        "cached_tokens_long": per_million(input_price * 0.20),
+        "cache_write_tokens_long": per_million(input_price * 2.50),
+        "output_tokens_long": per_million(output_price * 1.50),
+        # Flex, long context.
+        "input_tokens_flex_long": per_million(input_price),
+        "cached_tokens_flex_long": per_million(input_price * 0.10),
+        "cache_write_tokens_flex_long": per_million(input_price * 1.25),
+        "output_tokens_flex_long": per_million(output_price * 0.75),
         # Image generation tool tokens use the default GPT Image 2 pricing.
         "image_input_tokens": per_million(8.00),
         "image_cached_tokens": per_million(2.00),
