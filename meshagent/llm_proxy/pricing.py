@@ -37,6 +37,12 @@ OPENAI_LONG_CONTEXT_THRESHOLDS = {
     # Context-length pricing starts at 272K input tokens.
     "gpt-5.4": 272000,
     "gpt-5.4-2026-03-05": 272000,
+    "gpt-5.4-pro": 272000,
+    "gpt-5.4-pro-2026-03-05": 272000,
+    "gpt-5.5": 272000,
+    "gpt-5.5-2026-04-23": 272000,
+    "gpt-5.5-pro": 272000,
+    "gpt-5.5-pro-2026-04-23": 272000,
     "gpt-5.6": 272000,
     "gpt-5.6-sol": 272000,
     "gpt-5.6-terra": 272000,
@@ -451,6 +457,10 @@ gpt_5_4_mini_pricing = {
     "input_tokens_flex": per_million(0.375),
     "cached_tokens_flex": per_million(0.0375),
     "output_tokens_flex": per_million(2.25),
+    # Priority
+    "input_tokens_priority": per_million(1.50),
+    "cached_tokens_priority": per_million(0.15),
+    "output_tokens_priority": per_million(9.00),
 }
 
 gpt_5_4_nano_pricing = {
@@ -458,6 +468,25 @@ gpt_5_4_nano_pricing = {
     "input_tokens": per_million(0.20),
     "cached_tokens": per_million(0.02),
     "output_tokens": per_million(1.25),
+    # Flex
+    "input_tokens_flex": per_million(0.10),
+    "cached_tokens_flex": per_million(0.01),
+    "output_tokens_flex": per_million(0.625),
+}
+
+gpt_5_4_pro_pricing = {
+    # Standard
+    "input_tokens": per_million(30.00),
+    "output_tokens": per_million(180.00),
+    # Flex
+    "input_tokens_flex": per_million(15.00),
+    "output_tokens_flex": per_million(90.00),
+    # Standard long context
+    "input_tokens_long": per_million(60.00),
+    "output_tokens_long": per_million(270.00),
+    # Flex long context
+    "input_tokens_flex_long": per_million(30.00),
+    "output_tokens_flex_long": per_million(135.00),
 }
 
 # Source: https://openai.com/index/introducing-gpt-5-5/
@@ -480,6 +509,25 @@ gpt_5_5_pricing = {
     "input_tokens_priority": per_million(12.50),
     "cached_tokens_priority": per_million(1.25),
     "output_tokens_priority": per_million(75.00),
+    # Context-length pricing (>272K input tokens in session)
+    "input_tokens_long": per_million(10.00),
+    "cached_tokens_long": per_million(1.00),
+    "output_tokens_long": per_million(45.00),
+    "input_tokens_flex_long": per_million(5.00),
+    "cached_tokens_flex_long": per_million(0.50),
+    "output_tokens_flex_long": per_million(22.50),
+}
+
+gpt_5_5_pro_pricing = {
+    # GPT-5.5 Pro does not offer a cached-input discount.
+    "input_tokens": per_million(30.00),
+    "output_tokens": per_million(180.00),
+    # Flex is available for short-context requests.
+    "input_tokens_flex": per_million(15.00),
+    "output_tokens_flex": per_million(90.00),
+    # Standard long context
+    "input_tokens_long": per_million(60.00),
+    "output_tokens_long": per_million(270.00),
 }
 
 
@@ -819,8 +867,12 @@ pricing = {
         "gpt-5.6-luna": gpt_5_6_luna_pricing,
         "gpt-5.5": gpt_5_5_pricing,
         "gpt-5.5-2026-04-23": gpt_5_5_pricing,
+        "gpt-5.5-pro": gpt_5_5_pro_pricing,
+        "gpt-5.5-pro-2026-04-23": gpt_5_5_pro_pricing,
         "gpt-5.4": gpt_5_4_pricing,
         "gpt-5.4-2026-03-05": gpt_5_4_pricing,
+        "gpt-5.4-pro": gpt_5_4_pro_pricing,
+        "gpt-5.4-pro-2026-03-05": gpt_5_4_pro_pricing,
         "gpt-5.4-mini": gpt_5_4_mini_pricing,
         "gpt-5.4-mini-2026-03-17": gpt_5_4_mini_pricing,
         "gpt-5.2": gpt_5_2_pricing,
