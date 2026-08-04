@@ -98,10 +98,10 @@ def _apply_openai_service_tier(
     """Map OpenAI usage into tier-specific token keys.
 
     OpenAI supports different service tiers with different pricing (e.g. `flex`,
-    `priority`). We encode the tier into token type keys so aggregated reporting
-    remains correct.
+    `fast`). We encode the tier into token type keys so aggregated reporting
+    remains correct. `fast` and the legacy `priority` name use the same pricing.
 
-    Source: https://platform.openai.com/docs/pricing
+    Source: https://developers.openai.com/api/docs/pricing
     """
 
     if service_tier is None:
@@ -111,7 +111,9 @@ def _apply_openai_service_tier(
     if tier in {"standard", "default", ""}:
         return tokens
 
-    if tier not in {"flex", "priority"}:
+    if tier == "fast":
+        tier = "priority"
+    elif tier not in {"flex", "priority"}:
         return tokens
 
     model_pricing = pricing.get("openai", {}).get(model)
@@ -212,7 +214,9 @@ def is_pricing_available(
     if tier in {"standard", "default", ""}:
         return True
 
-    if tier not in {"flex", "priority"}:
+    if tier == "fast":
+        tier = "priority"
+    elif tier not in {"flex", "priority"}:
         return False
 
     # Tier is specified: require tier-specific base token pricing.
@@ -531,7 +535,9 @@ gpt_5_5_pro_pricing = {
 }
 
 
-# Source: https://openai.com/index/gpt-5-6/
+# Sources:
+# https://developers.openai.com/api/docs/pricing
+# https://openai.com/index/advancing-the-price-performance-frontier-with-gpt-5-6/
 # Cache reads cost 10% of uncached input; cache writes cost 125%.
 def gpt_5_6_pricing(*, input_price: float, output_price: float):
     return {
@@ -545,7 +551,7 @@ def gpt_5_6_pricing(*, input_price: float, output_price: float):
         "cached_tokens_flex": per_million(input_price * 0.05),
         "cache_write_tokens_flex": per_million(input_price * 0.625),
         "output_tokens_flex": per_million(output_price * 0.50),
-        # Priority is available for short-context requests only.
+        # Fast mode (legacy Priority token keys) is short-context only.
         "input_tokens_priority": per_million(input_price * 2.00),
         "cached_tokens_priority": per_million(input_price * 0.20),
         "cache_write_tokens_priority": per_million(input_price * 2.50),
@@ -568,8 +574,8 @@ def gpt_5_6_pricing(*, input_price: float, output_price: float):
 
 
 gpt_5_6_sol_pricing = gpt_5_6_pricing(input_price=5.00, output_price=30.00)
-gpt_5_6_terra_pricing = gpt_5_6_pricing(input_price=2.50, output_price=15.00)
-gpt_5_6_luna_pricing = gpt_5_6_pricing(input_price=1.00, output_price=6.00)
+gpt_5_6_terra_pricing = gpt_5_6_pricing(input_price=2.00, output_price=12.00)
+gpt_5_6_luna_pricing = gpt_5_6_pricing(input_price=0.20, output_price=1.20)
 
 # Codex mini pricing.
 # Source: https://platform.openai.com/docs/pricing

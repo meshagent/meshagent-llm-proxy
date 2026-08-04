@@ -105,6 +105,8 @@ async def proxy_websocket_request(
     on_upstream_event: Callable[[aiohttp.WSMessage], Awaitable[str | bytes | None]]
     | None = None,
     on_complete: Callable[[ProxyWebSocketOutcome], Awaitable[None]] | None = None,
+    authorization_lease: float | None = None,
+    authorize: Callable[[], Awaitable[bool]] | None = None,
 ) -> web.StreamResponse:
     async def _pump_ws(
         src: web.WebSocketResponse | aiohttp.ClientWebSocketResponse,
@@ -205,8 +207,38 @@ async def proxy_websocket_request(
                 _pump_ws(upstream_ws, client_ws, on_upstream_event)
             )
 
+            async def _renew_authorization() -> None:
+                if authorization_lease is None or authorize is None:
+                    await asyncio.Future()
+                    return
+                while True:
+                    await asyncio.sleep(authorization_lease)
+                    try:
+                        authorized = await authorize()
+                    except Exception as error:
+                        logger.info(
+                            "websocket authorization lease renewal failed",
+                            exc_info=error,
+                        )
+                        authorized = False
+                    if authorized:
+                        continue
+                    await asyncio.gather(
+                        client_ws.close(
+                            code=aiohttp.WSCloseCode.POLICY_VIOLATION,
+                            message=b"authentication revoked",
+                        ),
+                        upstream_ws.close(
+                            code=aiohttp.WSCloseCode.POLICY_VIOLATION,
+                            message=b"authentication revoked",
+                        ),
+                    )
+                    return
+
+            authorization_task = asyncio.create_task(_renew_authorization())
+
             done, pending = await asyncio.wait(
-                {client_task, upstream_task},
+                {client_task, upstream_task, authorization_task},
                 return_when=asyncio.FIRST_COMPLETED,
             )
             completed_sides: list[str] = []
@@ -214,6 +246,8 @@ async def proxy_websocket_request(
                 completed_sides.append("client")
             if upstream_task in done:
                 completed_sides.append("upstream")
+            if authorization_task in done:
+                completed_sides.append("authorization")
 
             for task in pending:
                 task.cancel()

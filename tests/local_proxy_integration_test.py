@@ -306,6 +306,58 @@ async def test_websocket_proxy_idle_connection_survives_low_heartbeats() -> None
 
 
 @pytest.mark.asyncio
+async def test_websocket_proxy_authorization_lease_closes_revoked_connection() -> None:
+    upstream_app = web.Application()
+    proxy_app = web.Application()
+
+    async def _handle_upstream_websocket(request: web.Request) -> web.StreamResponse:
+        websocket = web.WebSocketResponse()
+        await websocket.prepare(request)
+        async for _message in websocket:
+            pass
+        return websocket
+
+    upstream_app.router.add_get("/messages", _handle_upstream_websocket)
+    upstream_runner, _upstream_site, upstream_base_url = await _start_test_server(
+        upstream_app
+    )
+    proxy_session = aiohttp.ClientSession()
+
+    async def _authorize() -> bool:
+        return False
+
+    async def _handle_proxy_websocket(request: web.Request) -> web.StreamResponse:
+        return await proxy_websocket_request(
+            request=request,
+            http_session=proxy_session,
+            upstream_http_url=f"{upstream_base_url}/messages",
+            upstream_headers={},
+            authorization_lease=0.01,
+            authorize=_authorize,
+        )
+
+    proxy_app.router.add_get("/messages", _handle_proxy_websocket)
+    proxy_runner, _proxy_site, proxy_base_url = await _start_test_server(proxy_app)
+
+    try:
+        async with aiohttp.ClientSession() as client_session:
+            async with client_session.ws_connect(
+                f"{proxy_base_url.replace('http', 'ws')}/messages",
+            ) as websocket:
+                message = await asyncio.wait_for(websocket.receive(), timeout=1.0)
+                assert message.type in {
+                    aiohttp.WSMsgType.CLOSE,
+                    aiohttp.WSMsgType.CLOSING,
+                    aiohttp.WSMsgType.CLOSED,
+                }
+                assert websocket.close_code == aiohttp.WSCloseCode.POLICY_VIOLATION
+    finally:
+        await proxy_session.close()
+        await proxy_runner.cleanup()
+        await upstream_runner.cleanup()
+
+
+@pytest.mark.asyncio
 async def test_browser_facing_websocket_responds_to_server_heartbeat() -> None:
     heartbeat = 0.2
     app = web.Application()
