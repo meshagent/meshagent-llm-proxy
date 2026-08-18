@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 import aiohttp
 from aiohttp import web
+from multidict import CIMultiDict
 
 
 logger = logging.getLogger("meshagent.llm_proxy.proxy")
@@ -73,16 +74,16 @@ def filter_proxied_response_headers(
     headers: Mapping[str, str],
     *,
     remove_cors: bool = False,
-) -> dict[str, str]:
+) -> CIMultiDict[str]:
     blocked_headers = HOP_BY_HOP_RESPONSE_HEADERS
     if remove_cors:
         blocked_headers = blocked_headers | EXTRA_RESPONSE_HEADERS_TO_STRIP
 
-    return {
-        name: value
+    return CIMultiDict(
+        (name, value)
         for name, value in headers.items()
         if name.lower() not in blocked_headers
-    }
+    )
 
 
 def http_to_websocket_url(http_url: str) -> str:
