@@ -13,7 +13,7 @@ def per_thousand(n):
 
 
 LLM_PROXY_SURCHARGE_RATE = 0.05
-LLM_PROXY_SURCHARGED_PROVIDERS = frozenset({"openai", "anthropic"})
+LLM_PROXY_SURCHARGED_PROVIDERS = frozenset({"openai", "anthropic", "grok"})
 
 
 @dataclass(frozen=True)
@@ -48,6 +48,8 @@ OPENAI_LONG_CONTEXT_THRESHOLDS = {
     "gpt-5.6-terra": 272000,
     "gpt-5.6-luna": 272000,
 }
+
+GROK_LONG_CONTEXT_THRESHOLD = 200_000
 
 
 def _openai_input_tokens_for_context_pricing(tokens: dict[str, float]) -> float:
@@ -131,6 +133,25 @@ def _apply_openai_service_tier(
     return out
 
 
+def _apply_grok_service_tier(
+    *, tokens: dict[str, float], service_tier: str | None
+) -> dict[str, float]:
+    if str(service_tier or "").lower() not in {"priority", "fast"}:
+        return tokens
+    return {f"{key}_priority": value for key, value in tokens.items()}
+
+
+def _apply_grok_context_length_tier(tokens: dict[str, float]) -> dict[str, float]:
+    total_input = sum(
+        value
+        for key, value in tokens.items()
+        if key.startswith(("input_tokens", "cached_tokens"))
+    )
+    if total_input < GROK_LONG_CONTEXT_THRESHOLD:
+        return tokens
+    return {f"{key}_long": value for key, value in tokens.items()}
+
+
 # Preprocessors are keyed by provider then model.
 # Use "*" for a provider/model default.
 def _to_float(value) -> float | None:
@@ -176,6 +197,28 @@ def preprocess_openai_audio_minutes_usage(
     return preprocess_openai_usage(model="", usage=usage)
 
 
+def preprocess_grok_usage(*, model: str, usage: dict) -> dict[str, float] | None:
+    """Normalize both xAI Responses and Anthropic-compatible Messages usage."""
+    if not isinstance(usage, dict):
+        return None
+
+    if (
+        "cache_read_input_tokens" not in usage
+        and "cache_creation_input_tokens" not in usage
+    ):
+        return preprocess_openai_usage(model=model, usage=usage)
+
+    input_tokens = _to_float(usage.get("input_tokens")) or 0.0
+    cache_write_tokens = _to_float(usage.get("cache_creation_input_tokens")) or 0.0
+    cached_tokens = _to_float(usage.get("cache_read_input_tokens")) or 0.0
+    output_tokens = _to_float(usage.get("output_tokens")) or 0.0
+    return {
+        "input_tokens": input_tokens + cache_write_tokens,
+        "cached_tokens": cached_tokens,
+        "output_tokens": output_tokens,
+    }
+
+
 preprocessors = {
     "openai": {
         "*": preprocess_openai_usage,
@@ -185,6 +228,9 @@ preprocessors = {
     },
     "anthropic": {
         "*": preprocess_anthropic_usage,
+    },
+    "grok": {
+        "*": preprocess_grok_usage,
     },
 }
 
@@ -204,7 +250,7 @@ def is_pricing_available(
     if not isinstance(model_table, dict):
         return False
 
-    if provider != "openai":
+    if provider not in {"openai", "grok"}:
         return True
 
     if service_tier is None:
@@ -216,7 +262,7 @@ def is_pricing_available(
 
     if tier == "fast":
         tier = "priority"
-    elif tier not in {"flex", "priority"}:
+    elif tier not in ({"priority"} if provider == "grok" else {"flex", "priority"}):
         return False
 
     # Tier is specified: require tier-specific base token pricing.
@@ -262,6 +308,10 @@ def preprocess(
         tokens = _apply_openai_context_length_tier(
             model=model,
             tokens=tier_tokens,
+        )
+    elif provider == "grok":
+        tokens = _apply_grok_context_length_tier(
+            _apply_grok_service_tier(tokens=tokens, service_tier=service_tier)
         )
     filtered_tokens = _drop_zero_usage_values(tokens)
     if len(filtered_tokens) == 0:
@@ -736,6 +786,26 @@ computer_use_preview_pricing = {
 }
 
 
+def grok_text_pricing(
+    *, input_price: float, cached_price: float, output_price: float
+) -> dict[str, float]:
+    """xAI standard, priority (2x), and >=200K long-context token rates."""
+    return {
+        "input_tokens": per_million(input_price),
+        "cached_tokens": per_million(cached_price),
+        "output_tokens": per_million(output_price),
+        "input_tokens_priority": per_million(input_price * 2),
+        "cached_tokens_priority": per_million(cached_price * 2),
+        "output_tokens_priority": per_million(output_price * 2),
+        "input_tokens_long": per_million(input_price * 2),
+        "cached_tokens_long": per_million(cached_price * 2),
+        "output_tokens_long": per_million(output_price * 2),
+        "input_tokens_priority_long": per_million(input_price * 4),
+        "cached_tokens_priority_long": per_million(cached_price * 4),
+        "output_tokens_priority_long": per_million(output_price * 4),
+    }
+
+
 pricing = {
     "openai": {
         # Image models
@@ -1031,6 +1101,30 @@ pricing = {
         "claude-3-haiku-20240307": claude_haiku_3_pricing,
         "claude-3-haiku": claude_haiku_3_pricing,
         "claude-haiku-3": claude_haiku_3_pricing,
+    },
+    "grok": {
+        # Source: https://docs.x.ai/developers/pricing (retrieved 2026-08-17).
+        "grok-4.6": grok_text_pricing(
+            input_price=2.00, cached_price=0.50, output_price=6.00
+        ),
+        "grok-build-0.1": grok_text_pricing(
+            input_price=1.00, cached_price=0.20, output_price=2.00
+        ),
+        "grok-4.5": grok_text_pricing(
+            input_price=2.00, cached_price=0.30, output_price=6.00
+        ),
+        "grok-4.3": grok_text_pricing(
+            input_price=1.25, cached_price=0.20, output_price=2.50
+        ),
+        "grok-4.20-multi-agent-0309": grok_text_pricing(
+            input_price=1.25, cached_price=0.20, output_price=2.50
+        ),
+        "grok-4.20-0309-reasoning": grok_text_pricing(
+            input_price=1.25, cached_price=0.20, output_price=2.50
+        ),
+        "grok-4.20-0309-non-reasoning": grok_text_pricing(
+            input_price=1.25, cached_price=0.20, output_price=2.50
+        ),
     },
     "meshagent.fal": {
         "fal-ai/flux/dev": {"megapixels": 0.025},

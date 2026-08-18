@@ -119,6 +119,18 @@ def extract_openai_completion_usage(
     request: dict[str, Any],
     response: dict[str, Any],
 ) -> ModelUsage | None:
+    return extract_openai_compatible_completion_usage(
+        provider="openai", model=model, request=request, response=response
+    )
+
+
+def extract_openai_compatible_completion_usage(
+    *,
+    provider: str,
+    model: str,
+    request: dict[str, Any],
+    response: dict[str, Any],
+) -> ModelUsage | None:
     request_model = request.get("model")
     response_model = response.get("model")
     if not isinstance(response_model, str) or response_model.strip() == "":
@@ -133,7 +145,7 @@ def extract_openai_completion_usage(
         service_tier = None
 
     resolved_model = resolve_usage_model(
-        provider="openai",
+        provider=provider,
         response_model=response_model,
         request_model=request_model if isinstance(request_model, str) else None,
         service_tier=service_tier,
@@ -142,7 +154,7 @@ def extract_openai_completion_usage(
         return None
 
     tokens = preprocess(
-        provider="openai",
+        provider=provider,
         model=resolved_model,
         usage=usage,
         service_tier=service_tier,
@@ -150,11 +162,23 @@ def extract_openai_completion_usage(
     if tokens is None:
         return None
 
-    return ModelUsage(provider="openai", model=resolved_model, tokens=tokens)
+    return ModelUsage(provider=provider, model=resolved_model, tokens=tokens)
 
 
 def extract_anthropic_completion_usage(
     *,
+    model: str,
+    request: dict[str, Any],
+    response: dict[str, Any],
+) -> ModelUsage | None:
+    return extract_anthropic_compatible_completion_usage(
+        provider="anthropic", model=model, request=request, response=response
+    )
+
+
+def extract_anthropic_compatible_completion_usage(
+    *,
+    provider: str,
     model: str,
     request: dict[str, Any],
     response: dict[str, Any],
@@ -169,7 +193,7 @@ def extract_anthropic_completion_usage(
         return None
 
     resolved_model = resolve_usage_model(
-        provider="anthropic",
+        provider=provider,
         response_model=response_model,
         request_model=request_model if isinstance(request_model, str) else None,
     )
@@ -177,14 +201,14 @@ def extract_anthropic_completion_usage(
         return None
 
     tokens = preprocess(
-        provider="anthropic",
+        provider=provider,
         model=resolved_model,
         usage=usage,
     )
     if tokens is None:
         return None
 
-    return ModelUsage(provider="anthropic", model=resolved_model, tokens=tokens)
+    return ModelUsage(provider=provider, model=resolved_model, tokens=tokens)
 
 
 def extract_openai_transcription_model_from_session(session_obj: object) -> str | None:

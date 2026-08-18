@@ -1,11 +1,18 @@
 import pytest
 
 from meshagent.llm_proxy.local_proxy import build_local_proxy_env
-from meshagent.llm_proxy.pricing import build_usage_pricing_line_items, preprocess
+from meshagent.llm_proxy.pricing import (
+    build_usage_pricing_line_items,
+    preprocess,
+    pricing,
+)
+from meshagent.llm_proxy.providers import is_grok_path_allowed
 from meshagent.llm_proxy.usage import (
     UsageCollector,
     extract_anthropic_completion_usage,
+    extract_anthropic_compatible_completion_usage,
     extract_openai_completion_usage,
+    extract_openai_compatible_completion_usage,
     extract_openai_transcription_model_from_session,
 )
 
@@ -24,6 +31,69 @@ def test_extract_openai_completion_usage_prefers_priced_response_model() -> None
     assert usage.provider == "openai"
     assert usage.model == "gpt-5.4-2026-03-05"
     assert usage.tokens == {"input_tokens": 10.0, "output_tokens": 2.0}
+
+
+def test_grok_responses_and_messages_usage_use_grok_pricing() -> None:
+    responses_usage = extract_openai_compatible_completion_usage(
+        provider="grok",
+        model="grok-4.6",
+        request={"model": "grok-4.6"},
+        response={
+            "model": "grok-4.6",
+            "usage": {
+                "input_tokens": 10,
+                "input_tokens_details": {"cached_tokens": 4},
+                "output_tokens": 2,
+            },
+        },
+    )
+    messages_usage = extract_anthropic_compatible_completion_usage(
+        provider="grok",
+        model="grok-4.6",
+        request={"model": "grok-4.6"},
+        response={
+            "model": "grok-4.6",
+            "usage": {
+                "input_tokens": 6,
+                "cache_read_input_tokens": 4,
+                "output_tokens": 2,
+            },
+        },
+    )
+
+    assert responses_usage is not None
+    assert responses_usage.provider == "grok"
+    assert responses_usage.tokens == {
+        "input_tokens": 6.0,
+        "cached_tokens": 4.0,
+        "output_tokens": 2.0,
+    }
+    assert messages_usage is not None
+    assert messages_usage.provider == "grok"
+    assert messages_usage.tokens == {
+        "input_tokens": 6.0,
+        "cached_tokens": 4.0,
+        "output_tokens": 2.0,
+    }
+
+
+def test_grok_current_models_and_paths_are_exposed() -> None:
+    assert set(pricing["grok"]) == {
+        "grok-4.6",
+        "grok-build-0.1",
+        "grok-4.5",
+        "grok-4.3",
+        "grok-4.20-multi-agent-0309",
+        "grok-4.20-0309-reasoning",
+        "grok-4.20-0309-non-reasoning",
+    }
+    assert pricing["grok"]["grok-4.6"]["input_tokens"] == pytest.approx(2e-6)
+    assert pricing["grok"]["grok-4.6"]["cached_tokens"] == pytest.approx(0.5e-6)
+    assert pricing["grok"]["grok-4.6"]["output_tokens"] == pytest.approx(6e-6)
+    assert is_grok_path_allowed("/v1/messages")
+    assert is_grok_path_allowed("/v1/responses")
+    assert is_grok_path_allowed("/v1/responses/resp_123")
+    assert not is_grok_path_allowed("/v1/chat/completions")
 
 
 @pytest.mark.parametrize(
@@ -322,4 +392,8 @@ def test_build_local_proxy_env_uses_expected_base_urls() -> None:
         "OPENAI_API_KEY": "local-token",
         "ANTHROPIC_BASE_URL": "http://127.0.0.1:8766/anthropic",
         "ANTHROPIC_API_KEY": "local-token",
+        "GROK_BASE_URL": "http://127.0.0.1:8766/grok/v1",
+        "GROK_API_KEY": "local-token",
+        "XAI_BASE_URL": "http://127.0.0.1:8766/grok/v1",
+        "XAI_API_KEY": "local-token",
     }

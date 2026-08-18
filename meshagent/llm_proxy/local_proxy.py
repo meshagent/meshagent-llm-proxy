@@ -14,6 +14,7 @@ from meshagent.api.http import new_client_session
 
 from meshagent.llm_proxy.providers import (
     is_anthropic_path_allowed,
+    is_grok_path_allowed,
     is_openai_path_allowed,
     is_openai_websocket_path_allowed,
 )
@@ -26,9 +27,9 @@ from meshagent.llm_proxy.sse import SSEEvent
 from meshagent.llm_proxy.usage import (
     UsageCollector,
     UsageEvent,
-    extract_anthropic_completion_usage,
+    extract_anthropic_compatible_completion_usage,
     extract_openai_audio_speech_usage,
-    extract_openai_completion_usage,
+    extract_openai_compatible_completion_usage,
     extract_openai_image_usage,
     extract_openai_realtime_usage,
     extract_openai_transcription_model_from_session,
@@ -71,6 +72,10 @@ def build_local_proxy_env(
         "OPENAI_API_KEY": api_key,
         "ANTHROPIC_BASE_URL": f"{normalized_base_url}/anthropic",
         "ANTHROPIC_API_KEY": api_key,
+        "GROK_BASE_URL": f"{normalized_base_url}/grok/v1",
+        "GROK_API_KEY": api_key,
+        "XAI_BASE_URL": f"{normalized_base_url}/grok/v1",
+        "XAI_API_KEY": api_key,
     }
 
 
@@ -215,6 +220,10 @@ class LocalLLMProxyServer:
                 web.post("/anthropic/v1/{anthropic_path:.*}", self.anthropic_router),
                 web.put("/anthropic/v1/{anthropic_path:.*}", self.anthropic_router),
                 web.delete("/anthropic/v1/{anthropic_path:.*}", self.anthropic_router),
+                web.get("/grok/v1/{grok_path:.*}", self.grok_router),
+                web.post("/grok/v1/{grok_path:.*}", self.grok_router),
+                web.put("/grok/v1/{grok_path:.*}", self.grok_router),
+                web.delete("/grok/v1/{grok_path:.*}", self.grok_router),
             ]
         )
 
@@ -364,7 +373,9 @@ class LocalLLMProxyServer:
             status=status,
         )
 
-    async def openai_router(self, request: web.Request) -> web.StreamResponse:
+    async def openai_router(
+        self, request: web.Request, *, provider: str = "openai"
+    ) -> web.StreamResponse:
         request_id = str(uuid4())
         request_path = request.path
 
@@ -373,20 +384,25 @@ class LocalLLMProxyServer:
 
             v1_index = request.url.path.index("/v1")
             api_path = request.url.path[v1_index:]
-            if not is_openai_path_allowed(api_path):
+            path_allowed = (
+                is_grok_path_allowed(api_path)
+                if provider == "grok"
+                else is_openai_path_allowed(api_path)
+            )
+            if not path_allowed:
                 raise web.HTTPBadRequest(
                     text=f"Unsupported OpenAI API path '{api_path}'."
                 )
 
             query_string = request.url.query_string
-            upstream_http_url = f"{self._api_base_url}/openai{api_path}"
+            upstream_http_url = f"{self._api_base_url}/{provider}{api_path}"
             if query_string:
                 upstream_http_url = f"{upstream_http_url}?{query_string}"
 
             upstream_headers = await self._prepare_upstream_headers(request)
 
             if is_websocket_request(request):
-                if not is_openai_websocket_path_allowed(api_path):
+                if provider == "grok" or not is_openai_websocket_path_allowed(api_path):
                     raise web.HTTPBadRequest(
                         text=f"Unsupported OpenAI websocket path '{api_path}'."
                     )
@@ -400,7 +416,7 @@ class LocalLLMProxyServer:
                     outcome: ProxyWebSocketOutcome,
                 ) -> None:
                     await self._record_request_activity(
-                        provider="openai",
+                        provider=provider,
                         transport="websocket",
                         method=request.method,
                         path=request_path,
@@ -587,7 +603,8 @@ class LocalLLMProxyServer:
                     if isinstance(service_tier, str) and service_tier.strip() != "":
                         request_payload["service_tier"] = service_tier.strip()
 
-                    usage = extract_openai_completion_usage(
+                    usage = extract_openai_compatible_completion_usage(
+                        provider=provider,
                         model=response_model.strip(),
                         request=request_payload,
                         response=response_payload,
@@ -670,7 +687,8 @@ class LocalLLMProxyServer:
                                                 current_event.event
                                                 == "response.completed"
                                             ):
-                                                usage = extract_openai_completion_usage(
+                                                usage = extract_openai_compatible_completion_usage(
+                                                    provider=provider,
                                                     model=model,
                                                     request=json_request,
                                                     response=payload.get("response")
@@ -684,7 +702,8 @@ class LocalLLMProxyServer:
                                                 api_path == "/v1/chat/completions"
                                                 and "usage" in payload
                                             ):
-                                                usage = extract_openai_completion_usage(
+                                                usage = extract_openai_compatible_completion_usage(
+                                                    provider=provider,
                                                     model=model,
                                                     request=json_request,
                                                     response=payload,
@@ -704,7 +723,7 @@ class LocalLLMProxyServer:
 
                 if stream:
                     await self._record_request_activity(
-                        provider="openai",
+                        provider=provider,
                         transport="http",
                         method=request.method,
                         path=request_path,
@@ -737,7 +756,8 @@ class LocalLLMProxyServer:
                         and json_request is not None
                         and "usage" in json_response
                     ):
-                        usage = extract_openai_completion_usage(
+                        usage = extract_openai_compatible_completion_usage(
+                            provider=provider,
                             model=model,
                             request=json_request,
                             response=json_response,
@@ -770,7 +790,7 @@ class LocalLLMProxyServer:
                     await self._record_usage(request_id=request_id, usage=usage)
 
                 await self._record_request_activity(
-                    provider="openai",
+                    provider=provider,
                     transport="http",
                     method=request.method,
                     path=request_path,
@@ -787,7 +807,7 @@ class LocalLLMProxyServer:
                 return response
         except web.HTTPException as ex:
             await self._record_request_activity(
-                provider="openai",
+                provider=provider,
                 transport="websocket" if is_websocket_request(request) else "http",
                 method=request.method,
                 path=request_path,
@@ -802,7 +822,7 @@ class LocalLLMProxyServer:
         except Exception as ex:
             logger.exception("OpenAI proxy request failed", exc_info=ex)
             await self._record_request_activity(
-                provider="openai",
+                provider=provider,
                 transport="websocket" if is_websocket_request(request) else "http",
                 method=request.method,
                 path=request_path,
@@ -815,7 +835,9 @@ class LocalLLMProxyServer:
             )
             raise
 
-    async def anthropic_router(self, request: web.Request) -> web.StreamResponse:
+    async def anthropic_router(
+        self, request: web.Request, *, provider: str = "anthropic"
+    ) -> web.StreamResponse:
         request_id = str(uuid4())
         request_path = request.path
 
@@ -824,12 +846,17 @@ class LocalLLMProxyServer:
 
             v1_index = request.url.path.index("/v1")
             api_path = request.url.path[v1_index:]
-            if not is_anthropic_path_allowed(api_path):
+            path_allowed = (
+                is_grok_path_allowed(api_path)
+                if provider == "grok"
+                else is_anthropic_path_allowed(api_path)
+            )
+            if not path_allowed:
                 raise web.HTTPBadRequest(
                     text=f"Unsupported Anthropic API path '{api_path}'."
                 )
 
-            upstream_http_url = f"{self._api_base_url}/anthropic{api_path}"
+            upstream_http_url = f"{self._api_base_url}/{provider}{api_path}"
             if request.url.query_string:
                 upstream_http_url = f"{upstream_http_url}?{request.url.query_string}"
 
@@ -919,7 +946,8 @@ class LocalLLMProxyServer:
 
                 if stream:
                     if stream_usage and json_request is not None and model is not None:
-                        usage = extract_anthropic_completion_usage(
+                        usage = extract_anthropic_compatible_completion_usage(
+                            provider=provider,
                             model=model,
                             request=json_request,
                             response={"usage": stream_usage},
@@ -927,7 +955,7 @@ class LocalLLMProxyServer:
                         await self._record_usage(request_id=request_id, usage=usage)
 
                     await self._record_request_activity(
-                        provider="anthropic",
+                        provider=provider,
                         transport="http",
                         method=request.method,
                         path=request_path,
@@ -958,7 +986,8 @@ class LocalLLMProxyServer:
                     and json_request is not None
                     and model is not None
                 ):
-                    usage = extract_anthropic_completion_usage(
+                    usage = extract_anthropic_compatible_completion_usage(
+                        provider=provider,
                         model=model,
                         request=json_request,
                         response=json_response,
@@ -968,7 +997,7 @@ class LocalLLMProxyServer:
 
                 await response.write(body)
                 await self._record_request_activity(
-                    provider="anthropic",
+                    provider=provider,
                     transport="http",
                     method=request.method,
                     path=request_path,
@@ -984,7 +1013,7 @@ class LocalLLMProxyServer:
                 return response
         except web.HTTPException as ex:
             await self._record_request_activity(
-                provider="anthropic",
+                provider=provider,
                 transport="http",
                 method=request.method,
                 path=request_path,
@@ -996,10 +1025,11 @@ class LocalLLMProxyServer:
                 request_id=request_id,
             )
             raise
+
         except Exception as ex:
             logger.exception("Anthropic proxy request failed", exc_info=ex)
             await self._record_request_activity(
-                provider="anthropic",
+                provider=provider,
                 transport="http",
                 method=request.method,
                 path=request_path,
@@ -1011,3 +1041,10 @@ class LocalLLMProxyServer:
                 request_id=request_id,
             )
             raise
+
+    async def grok_router(self, request: web.Request) -> web.StreamResponse:
+        v1_index = request.url.path.index("/v1")
+        api_path = request.url.path[v1_index:]
+        if api_path == "/v1/messages" or api_path.startswith("/v1/messages/"):
+            return await self.anthropic_router(request, provider="grok")
+        return await self.openai_router(request, provider="grok")

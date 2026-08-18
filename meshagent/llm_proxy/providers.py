@@ -32,6 +32,17 @@ ANTHROPIC_ALLOWED_PREFIXES = (
     "/v1/messages/batches",
 )
 
+GROK_ALLOWED_EXACT_PATHS = frozenset(
+    {
+        "/v1/models",
+        "/v1/messages",
+        "/v1/responses",
+        "/v1/responses/compact",
+        "/v1/responses/input_tokens",
+    }
+)
+GROK_ALLOWED_PREFIXES = ("/v1/models/", "/v1/responses/")
+
 
 def is_openai_path_allowed(api_path: str) -> bool:
     return api_path in OPENAI_ALLOWED_EXACT_PATHS or api_path.startswith(
@@ -42,6 +53,12 @@ def is_openai_path_allowed(api_path: str) -> bool:
 def is_anthropic_path_allowed(api_path: str) -> bool:
     return api_path in ANTHROPIC_ALLOWED_EXACT_PATHS or api_path.startswith(
         ANTHROPIC_ALLOWED_PREFIXES
+    )
+
+
+def is_grok_path_allowed(api_path: str) -> bool:
+    return api_path in GROK_ALLOWED_EXACT_PATHS or api_path.startswith(
+        GROK_ALLOWED_PREFIXES
     )
 
 
