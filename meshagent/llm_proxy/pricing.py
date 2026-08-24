@@ -34,7 +34,7 @@ class ChargeSpec:
 
 OPENAI_LONG_CONTEXT_THRESHOLDS = {
     # Source: https://platform.openai.com/docs/pricing
-    # Context-length pricing starts at 272K input tokens.
+    # Context-length pricing applies above 272K input tokens.
     "gpt-5.4": 272000,
     "gpt-5.4-2026-03-05": 272000,
     "gpt-5.4-pro": 272000,
@@ -74,7 +74,7 @@ def _apply_openai_context_length_tier(
         return tokens
 
     total_input_tokens = _openai_input_tokens_for_context_pricing(tokens)
-    if total_input_tokens < threshold:
+    if total_input_tokens <= threshold:
         return tokens
 
     model_pricing = pricing.get("openai", {}).get(model)
@@ -493,7 +493,7 @@ gpt_5_4_pricing = {
     "input_tokens_priority": per_million(5.00),
     "cached_tokens_priority": per_million(0.50),
     "output_tokens_priority": per_million(30.00),
-    # Context-length pricing (>=272K input tokens in session)
+    # Context-length pricing (>272K input tokens in session)
     "input_tokens_long": per_million(5.00),
     "cached_tokens_long": per_million(0.50),
     "output_tokens_long": per_million(22.50),
@@ -601,7 +601,7 @@ def gpt_5_6_pricing(*, input_price: float, output_price: float):
         "cached_tokens_flex": per_million(input_price * 0.05),
         "cache_write_tokens_flex": per_million(input_price * 0.625),
         "output_tokens_flex": per_million(output_price * 0.50),
-        # Fast mode (legacy Priority token keys) is short-context only.
+        # Fast mode (legacy Priority token keys), short context.
         "input_tokens_priority": per_million(input_price * 2.00),
         "cached_tokens_priority": per_million(input_price * 0.20),
         "cache_write_tokens_priority": per_million(input_price * 2.50),
@@ -616,6 +616,11 @@ def gpt_5_6_pricing(*, input_price: float, output_price: float):
         "cached_tokens_flex_long": per_million(input_price * 0.10),
         "cache_write_tokens_flex_long": per_million(input_price * 1.25),
         "output_tokens_flex_long": per_million(output_price * 0.75),
+        # Fast mode (legacy Priority token keys), long context.
+        "input_tokens_priority_long": per_million(input_price * 4.00),
+        "cached_tokens_priority_long": per_million(input_price * 0.40),
+        "cache_write_tokens_priority_long": per_million(input_price * 5.00),
+        "output_tokens_priority_long": per_million(output_price * 3.00),
         # Image generation tool tokens use the default GPT Image 2 pricing.
         "image_input_tokens": per_million(8.00),
         "image_cached_tokens": per_million(2.00),
@@ -623,7 +628,7 @@ def gpt_5_6_pricing(*, input_price: float, output_price: float):
     }
 
 
-gpt_5_6_sol_pricing = gpt_5_6_pricing(input_price=5.00, output_price=30.00)
+gpt_5_6_sol_pricing = gpt_5_6_pricing(input_price=4.00, output_price=20.00)
 gpt_5_6_terra_pricing = gpt_5_6_pricing(input_price=2.00, output_price=12.00)
 gpt_5_6_luna_pricing = gpt_5_6_pricing(input_price=0.20, output_price=1.20)
 
