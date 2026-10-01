@@ -47,6 +47,10 @@ OPENAI_LONG_CONTEXT_THRESHOLDS = {
     "gpt-5.6-sol": 272000,
     "gpt-5.6-terra": 272000,
     "gpt-5.6-luna": 272000,
+    "gpt-6-astra": 272000,
+    "gpt-6-sol": 272000,
+    "gpt-6.1-sol": 272000,
+    "gpt-6-luna": 272000,
 }
 
 GROK_LONG_CONTEXT_THRESHOLD = 200_000
@@ -115,7 +119,7 @@ def _apply_openai_service_tier(
 
     if tier == "fast":
         tier = "priority"
-    elif tier not in {"flex", "priority"}:
+    elif tier not in {"flex", "priority", "ultrafast"}:
         return tokens
 
     model_pricing = pricing.get("openai", {}).get(model)
@@ -224,6 +228,9 @@ preprocessors = {
         "*": preprocess_openai_usage,
         "gpt-realtime-translate": preprocess_openai_audio_minutes_usage,
         "gpt-realtime-whisper": preprocess_openai_audio_minutes_usage,
+        "gpt-live-transcribe": preprocess_openai_audio_minutes_usage,
+        "gpt-transcribe": preprocess_openai_audio_minutes_usage,
+        "gpt-live-1": preprocess_openai_audio_minutes_usage,
         "whisper-1": preprocess_openai_audio_minutes_usage,
     },
     "anthropic": {
@@ -262,7 +269,9 @@ def is_pricing_available(
 
     if tier == "fast":
         tier = "priority"
-    elif tier not in ({"priority"} if provider == "grok" else {"flex", "priority"}):
+    elif tier not in (
+        {"priority"} if provider == "grok" else {"flex", "priority", "ultrafast"}
+    ):
         return False
 
     # Tier is specified: require tier-specific base token pricing.
@@ -588,37 +597,40 @@ gpt_5_5_pro_pricing = {
 # Sources:
 # https://developers.openai.com/api/docs/pricing
 # https://openai.com/index/advancing-the-price-performance-frontier-with-gpt-5-6/
-# Cache reads cost 10% of uncached input; cache writes cost 125%.
-def gpt_5_6_pricing(*, input_price: float, output_price: float):
+# Cache reads default to 10% of uncached input; cache writes cost 125%.
+def openai_cached_text_pricing(
+    *, input_price: float, output_price: float, cache_read_multiplier: float = 0.10
+) -> dict[str, float]:
+    cached_price = input_price * cache_read_multiplier
     return {
         # Standard, short context.
         "input_tokens": per_million(input_price),
-        "cached_tokens": per_million(input_price * 0.10),
+        "cached_tokens": per_million(cached_price),
         "cache_write_tokens": per_million(input_price * 1.25),
         "output_tokens": per_million(output_price),
         # Flex, short context.
         "input_tokens_flex": per_million(input_price * 0.50),
-        "cached_tokens_flex": per_million(input_price * 0.05),
+        "cached_tokens_flex": per_million(cached_price * 0.50),
         "cache_write_tokens_flex": per_million(input_price * 0.625),
         "output_tokens_flex": per_million(output_price * 0.50),
         # Fast mode (legacy Priority token keys), short context.
         "input_tokens_priority": per_million(input_price * 2.00),
-        "cached_tokens_priority": per_million(input_price * 0.20),
+        "cached_tokens_priority": per_million(cached_price * 2.00),
         "cache_write_tokens_priority": per_million(input_price * 2.50),
         "output_tokens_priority": per_million(output_price * 2.00),
         # Standard, long context.
         "input_tokens_long": per_million(input_price * 2.00),
-        "cached_tokens_long": per_million(input_price * 0.20),
+        "cached_tokens_long": per_million(cached_price * 2.00),
         "cache_write_tokens_long": per_million(input_price * 2.50),
         "output_tokens_long": per_million(output_price * 1.50),
         # Flex, long context.
         "input_tokens_flex_long": per_million(input_price),
-        "cached_tokens_flex_long": per_million(input_price * 0.10),
+        "cached_tokens_flex_long": per_million(cached_price),
         "cache_write_tokens_flex_long": per_million(input_price * 1.25),
         "output_tokens_flex_long": per_million(output_price * 0.75),
         # Fast mode (legacy Priority token keys), long context.
         "input_tokens_priority_long": per_million(input_price * 4.00),
-        "cached_tokens_priority_long": per_million(input_price * 0.40),
+        "cached_tokens_priority_long": per_million(cached_price * 4.00),
         "cache_write_tokens_priority_long": per_million(input_price * 5.00),
         "output_tokens_priority_long": per_million(output_price * 3.00),
         # Image generation tool tokens use the default GPT Image 2 pricing.
@@ -628,9 +640,28 @@ def gpt_5_6_pricing(*, input_price: float, output_price: float):
     }
 
 
-gpt_5_6_sol_pricing = gpt_5_6_pricing(input_price=4.00, output_price=20.00)
-gpt_5_6_terra_pricing = gpt_5_6_pricing(input_price=2.00, output_price=12.00)
-gpt_5_6_luna_pricing = gpt_5_6_pricing(input_price=0.20, output_price=1.20)
+gpt_5_6_sol_pricing = openai_cached_text_pricing(input_price=4.00, output_price=20.00)
+gpt_5_6_terra_pricing = openai_cached_text_pricing(input_price=2.00, output_price=12.00)
+gpt_5_6_luna_pricing = openai_cached_text_pricing(input_price=0.20, output_price=1.20)
+
+# Source: https://developers.openai.com/api/docs/pricing
+gpt_6_astra_pricing = openai_cached_text_pricing(input_price=10.00, output_price=50.00)
+gpt_6_sol_pricing = openai_cached_text_pricing(input_price=2.00, output_price=10.00)
+gpt_6_1_sol_pricing = openai_cached_text_pricing(
+    input_price=2.00, output_price=10.00, cache_read_multiplier=0.05
+)
+gpt_6_luna_pricing = openai_cached_text_pricing(input_price=0.10, output_price=0.50)
+# Ultrafast is available only for GPT-6 Astra, at 6x Standard rates.
+for token_type in (
+    "input_tokens",
+    "cached_tokens",
+    "cache_write_tokens",
+    "output_tokens",
+):
+    gpt_6_astra_pricing[f"{token_type}_ultrafast"] = gpt_6_astra_pricing[token_type] * 6
+    gpt_6_astra_pricing[f"{token_type}_ultrafast_long"] = (
+        gpt_6_astra_pricing[f"{token_type}_long"] * 6
+    )
 
 # Codex mini pricing.
 # Source: https://platform.openai.com/docs/pricing
@@ -736,12 +767,31 @@ claude_sonnet_4_6_pricing = {
     "output_tokens": per_million(15.00),
 }
 
-# Introductory pricing through August 31, 2026.
+# The launch pricing became permanent on August 10, 2026.
 claude_sonnet_5_pricing = {
     "input_tokens": per_million(2.00),
     "cache_creation_input_tokens": per_million(2.50),
     "cache_read_input_tokens": per_million(0.20),
     "output_tokens": per_million(10.00),
+}
+
+claude_sonnet_5_5_pricing = claude_sonnet_5_pricing
+claude_opus_5_pricing = claude_opus_4_8_pricing
+claude_opus_5_5_pricing = {
+    "input_tokens": per_million(4.00),
+    "cache_creation_input_tokens": per_million(5.00),
+    "cache_read_input_tokens": per_million(0.20),
+    "output_tokens": per_million(20.00),
+}
+claude_fable_5_pricing = {
+    "input_tokens": per_million(10.00),
+    "cache_creation_input_tokens": per_million(12.50),
+    "cache_read_input_tokens": per_million(1.00),
+    "output_tokens": per_million(50.00),
+}
+claude_fable_5_1_pricing = {
+    **claude_fable_5_pricing,
+    "cache_read_input_tokens": per_million(0.25),
 }
 
 claude_haiku_4_5_pricing = {
@@ -811,19 +861,34 @@ def grok_text_pricing(
     }
 
 
+gpt_image_2_pricing = {
+    # Text tokens
+    "input_tokens": per_million(5.00),
+    "cached_tokens": per_million(1.25),
+    # Image tokens
+    "image_input_tokens": per_million(8.00),
+    "image_cached_tokens": per_million(2.00),
+    "image_output_tokens": per_million(30.00),
+}
+
+gpt_realtime_mini_pricing = {
+    "input_tokens": per_million(0.60),
+    "cached_tokens": per_million(0.06),
+    "output_tokens": per_million(2.40),
+    "audio_input_tokens": per_million(10.00),
+    "audio_cached_tokens": per_million(0.30),
+    "audio_output_tokens": per_million(20.00),
+    "image_input_tokens": per_million(0.80),
+    "image_cached_tokens": per_million(0.08),
+}
+
 pricing = {
     "openai": {
         # Image models
         # Source: https://developers.openai.com/api/docs/pricing
-        "gpt-image-2": {
-            # Text tokens
-            "input_tokens": per_million(5.00),
-            "cached_tokens": per_million(1.25),
-            # Image tokens
-            "image_input_tokens": per_million(8.00),
-            "image_cached_tokens": per_million(2.00),
-            "image_output_tokens": per_million(30.00),
-        },
+        "gpt-image-2": gpt_image_2_pricing,
+        "gpt-image-2.5-sunburst": gpt_image_2_pricing,
+        "gpt-image-2.5-flare": gpt_image_2_pricing,
         "gpt-image-1.5": {
             # Text tokens
             "input_tokens": per_million(5.00),
@@ -890,16 +955,8 @@ pricing = {
         },
         "gpt-realtime": gpt_realtime_pricing,
         "gpt-realtime-1.5": gpt_realtime_pricing,
-        "gpt-realtime-mini": {
-            "input_tokens": per_million(0.60),
-            "cached_tokens": per_million(0.06),
-            "output_tokens": per_million(2.40),
-            "audio_input_tokens": per_million(10.00),
-            "audio_cached_tokens": per_million(0.30),
-            "audio_output_tokens": per_million(20.00),
-            "image_input_tokens": per_million(0.80),
-            "image_cached_tokens": per_million(0.08),
-        },
+        "gpt-realtime-2.1-mini": gpt_realtime_mini_pricing,
+        "gpt-realtime-mini": gpt_realtime_mini_pricing,
         # Realtime 2
         # Source: https://openai.com/api/pricing/
         "gpt-realtime-2.1": gpt_realtime_2_pricing,
@@ -910,6 +967,9 @@ pricing = {
         "gpt-realtime-whisper": {
             "audio_minutes": 0.017,
         },
+        "gpt-live-transcribe": {"audio_minutes": 0.017},
+        "gpt-transcribe": {"audio_minutes": 0.0045},
+        "gpt-live-1": {"audio_minutes": 0.05},
         # Speech / transcription (STT + TTS)
         # Source: https://platform.openai.com/docs/pricing
         "gpt-4o-mini-tts": {
@@ -942,6 +1002,16 @@ pricing = {
             "input_characters": per_million(30.00),
         },
         "gpt-5": gpt_5_pricing,
+        "gpt-6.1-sol": gpt_6_1_sol_pricing,
+        "gpt-6-astra": gpt_6_astra_pricing,
+        "gpt-6-sol": gpt_6_sol_pricing,
+        "gpt-6-luna": gpt_6_luna_pricing,
+        "gpt-5.6-cyber": {
+            "input_tokens": per_million(12.50),
+            "cached_tokens": per_million(1.25),
+            "cache_write_tokens": per_million(15.625),
+            "output_tokens": per_million(75.00),
+        },
         "gpt-5.6": gpt_5_6_sol_pricing,
         "gpt-5.6-sol": gpt_5_6_sol_pricing,
         "gpt-5.6-terra": gpt_5_6_terra_pricing,
@@ -1071,6 +1141,13 @@ pricing = {
         "o4-mini-2025-01-31": o4_mini_pricing,
     },
     "anthropic": {
+        "claude-fable-5-1": claude_fable_5_1_pricing,
+        "claude-mythos-5-1": claude_fable_5_1_pricing,
+        "claude-fable-5": claude_fable_5_pricing,
+        "claude-mythos-5": claude_fable_5_pricing,
+        "claude-opus-5-5": claude_opus_5_5_pricing,
+        "claude-opus-5": claude_opus_5_pricing,
+        "claude-sonnet-5-5": claude_sonnet_5_5_pricing,
         # Latest model aliases
         "claude-opus-4-8": claude_opus_4_8_pricing,
         "claude-opus-4-7": claude_opus_4_7_pricing,
