@@ -2,6 +2,7 @@ OPENAI_ALLOWED_EXACT_PATHS = frozenset(
     {
         "/v1/chat/completions",
         "/v1/responses",
+        "/v1/decisions",
         "/v1/responses/compact",
         "/v1/responses/input_tokens",
         "/v1/embeddings",

@@ -752,7 +752,8 @@ class LocalLLMProxyServer:
                 if isinstance(json_response, dict):
                     usage = None
                     if (
-                        model is not None
+                        200 <= resp.status < 300
+                        and model is not None
                         and json_request is not None
                         and "usage" in json_response
                     ):
@@ -761,9 +762,11 @@ class LocalLLMProxyServer:
                             model=model,
                             request=json_request,
                             response=json_response,
+                            api_path=api_path,
                         )
                     elif (
-                        api_path.startswith("/v1/images/")
+                        200 <= resp.status < 300
+                        and api_path.startswith("/v1/images/")
                         and model is not None
                         and json_request is not None
                     ):

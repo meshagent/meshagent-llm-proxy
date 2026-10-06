@@ -286,6 +286,7 @@ def preprocess(
     model: str,
     usage: dict,
     service_tier: str | None = None,
+    api_path: str | None = None,
 ) -> dict[str, float] | None:
     """Normalize/flatten usage to a pricing-compatible token dict.
 
@@ -295,6 +296,25 @@ def preprocess(
 
     Callers should pass only the `usage` object.
     """
+
+    if provider == "openai" and api_path == "/v1/decisions":
+        # Decisions bills all input tokens at its endpoint-specific rate, without
+        # separate cache or output charges or processing-tier discounts.
+        # Source: https://developers.openai.com/api/docs/guides/decisions
+        input_tokens = _to_float(usage.get("input_tokens"))
+        if input_tokens is None:
+            return None
+        tokens = {"input_tokens_decisions": input_tokens}
+        for key in ("total_tokens", "compute_units"):
+            value = _to_float(usage.get(key))
+            if value is not None:
+                tokens[key] = value
+        return (
+            _drop_zero_usage_values(
+                _apply_openai_context_length_tier(model=model, tokens=tokens)
+            )
+            or None
+        )
 
     provider_table = preprocessors.get(provider)
     if provider_table is None:
@@ -1005,7 +1025,13 @@ pricing = {
         "gpt-6.1-sol": gpt_6_1_sol_pricing,
         "gpt-6-astra": gpt_6_astra_pricing,
         "gpt-6-sol": gpt_6_sol_pricing,
-        "gpt-6-luna": gpt_6_luna_pricing,
+        "gpt-6-luna": {
+            **gpt_6_luna_pricing,
+            # Decisions has input-only pricing, including the long-context 2x rate.
+            # Source: https://developers.openai.com/api/docs/guides/decisions
+            "input_tokens_decisions": per_million(0.10),
+            "input_tokens_decisions_long": per_million(0.20),
+        },
         "gpt-5.6-cyber": {
             "input_tokens": per_million(12.50),
             "cached_tokens": per_million(1.25),

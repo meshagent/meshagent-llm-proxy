@@ -130,6 +130,7 @@ def extract_openai_compatible_completion_usage(
     model: str,
     request: dict[str, Any],
     response: dict[str, Any],
+    api_path: str | None = None,
 ) -> ModelUsage | None:
     request_model = request.get("model")
     response_model = response.get("model")
@@ -141,7 +142,7 @@ def extract_openai_compatible_completion_usage(
         return None
 
     service_tier = request.get("service_tier")
-    if not isinstance(service_tier, str):
+    if not isinstance(service_tier, str) or api_path == "/v1/decisions":
         service_tier = None
 
     resolved_model = resolve_usage_model(
@@ -158,6 +159,7 @@ def extract_openai_compatible_completion_usage(
         model=resolved_model,
         usage=usage,
         service_tier=service_tier,
+        api_path=api_path,
     )
     if tokens is None:
         return None

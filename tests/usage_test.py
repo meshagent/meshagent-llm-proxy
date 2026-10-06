@@ -1,18 +1,21 @@
 import pytest
-
 from meshagent.llm_proxy.local_proxy import build_local_proxy_env
 from meshagent.llm_proxy.pricing import (
     build_usage_pricing_line_items,
     preprocess,
     pricing,
 )
-from meshagent.llm_proxy.providers import is_grok_path_allowed
+from meshagent.llm_proxy.providers import (
+    is_grok_path_allowed,
+    is_openai_path_allowed,
+    is_openai_websocket_path_allowed,
+)
 from meshagent.llm_proxy.usage import (
     UsageCollector,
-    extract_anthropic_completion_usage,
     extract_anthropic_compatible_completion_usage,
-    extract_openai_completion_usage,
+    extract_anthropic_completion_usage,
     extract_openai_compatible_completion_usage,
+    extract_openai_completion_usage,
     extract_openai_transcription_model_from_session,
 )
 
@@ -31,6 +34,112 @@ def test_extract_openai_completion_usage_prefers_priced_response_model() -> None
     assert usage.provider == "openai"
     assert usage.model == "gpt-5.4-2026-03-05"
     assert usage.tokens == {"input_tokens": 10.0, "output_tokens": 2.0}
+
+
+@pytest.mark.parametrize("input_tokens", [42, 272_000, 272_001, 1_000_000])
+@pytest.mark.parametrize("service_tier", [None, "flex", "fast"])
+def test_decisions_usage_bills_only_input_with_endpoint_pricing(
+    input_tokens: int, service_tier: str | None
+) -> None:
+    usage = extract_openai_compatible_completion_usage(
+        provider="openai",
+        api_path="/v1/decisions",
+        model="gpt-6-luna",
+        request={"model": "gpt-6-luna", "service_tier": service_tier},
+        response={
+            "model": "gpt-6-luna",
+            "answers": [{"type": "refusal", "name": "damaged"}],
+            "usage": {
+                "input_tokens": input_tokens,
+                "input_tokens_details": {"cached_tokens": 10, "cache_write_tokens": 5},
+                "output_tokens": 7,
+                "output_tokens_details": {"reasoning_tokens": 7},
+                "total_tokens": input_tokens + 7,
+                "compute_units": 3,
+            },
+        },
+    )
+    assert usage is not None
+    key = "input_tokens_decisions"
+    rate = 0.10 / 1_000_000
+    if input_tokens > 272_000:
+        key += "_long"
+        rate *= 2
+    assert usage.tokens == {
+        key: float(input_tokens),
+        "total_tokens": float(input_tokens + 7),
+        "compute_units": 3.0,
+    }
+    assert usage.provider == "openai"
+    assert usage.model == "gpt-6-luna"
+    line_items = build_usage_pricing_line_items(
+        provider=usage.provider, model=usage.model, usage=usage.tokens
+    )
+    assert [item.type for item in line_items] == [key, "llm_proxy_surcharge"]
+    assert line_items[0].unit_price == pytest.approx(rate)
+    assert sum(item.amount for item in line_items) == pytest.approx(
+        input_tokens * rate * 1.05
+    )
+    custom_items = build_usage_pricing_line_items(
+        provider=usage.provider,
+        model=usage.model,
+        usage={f"custom_{key}": value for key, value in usage.tokens.items()},
+    )
+    assert [item.type for item in custom_items] == ["llm_proxy_surcharge"]
+    assert custom_items[0].amount == pytest.approx(input_tokens * rate * 0.05)
+
+
+def test_decisions_paths_and_missing_usage() -> None:
+    assert is_openai_path_allowed("/v1/decisions")
+    assert not is_openai_path_allowed("/v1/decisions/unknown")
+    assert not is_grok_path_allowed("/v1/decisions")
+    assert not is_openai_websocket_path_allowed("/v1/decisions")
+    for response in ({"answers": []}, {"usage": {"output_tokens": 1}}):
+        assert (
+            extract_openai_compatible_completion_usage(
+                provider="openai",
+                api_path="/v1/decisions",
+                model="gpt-6-luna",
+                request={"model": "gpt-6-luna"},
+                response=response,
+            )
+            is None
+        )
+
+
+@pytest.mark.asyncio
+async def test_decisions_and_responses_aggregate_without_mixing_rates() -> None:
+    collector = UsageCollector()
+    response = {
+        "model": "gpt-6-luna",
+        "usage": {
+            "input_tokens": 100,
+            "input_tokens_details": {"cached_tokens": 40, "cache_write_tokens": 20},
+            "output_tokens": 10,
+        },
+    }
+    for api_path in ("/v1/decisions", "/v1/responses"):
+        usage = extract_openai_compatible_completion_usage(
+            provider="openai",
+            api_path=api_path,
+            model="gpt-6-luna",
+            request={"model": "gpt-6-luna", "service_tier": "flex"},
+            response=response,
+        )
+        assert usage is not None
+        await collector.record_model_usage(usage)
+    snapshot = await collector.snapshot()
+    assert snapshot.total_requests == 2
+    assert len(snapshot.summaries) == 1
+    assert snapshot.summaries[0].tokens == {
+        "input_tokens_decisions": 100.0,
+        "input_tokens_flex": 40.0,
+        "cached_tokens_flex": 40.0,
+        "cache_write_tokens_flex": 20.0,
+        "output_tokens_flex": 10.0,
+    }
+    assert snapshot.subtotal == pytest.approx(0.00001595)
+    assert snapshot.total == pytest.approx(snapshot.subtotal * 1.05)
 
 
 def test_grok_responses_and_messages_usage_use_grok_pricing() -> None:

@@ -9,16 +9,16 @@ import aiohttp
 import pytest
 from aiohttp import web
 from anthropic import AsyncAnthropic
-from openai import AsyncOpenAI
-
+from meshagent.api.http import new_client_session
 from meshagent.llm_proxy.local_proxy import (
-    LocalLLMProxyServer,
     MESHAGENT_PROJECT_ID_HEADER,
+    LocalLLMProxyServer,
 )
 from meshagent.llm_proxy.proxy import (
     ProxyWebSocketOutcome,
     proxy_websocket_request,
 )
+from openai import AsyncOpenAI
 
 
 class _RecordedRequest(TypedDict):
@@ -40,6 +40,81 @@ async def _start_test_server(
     assert sockets is not None and len(sockets) > 0
     port = sockets[0].getsockname()[1]
     return runner, site, f"http://127.0.0.1:{port}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [200, 400])
+async def test_local_proxy_decisions_forwards_answers_and_records_priced_usage(
+    status: int,
+) -> None:
+    recorded: list[dict[str, Any]] = []
+    payload = {
+        "model": "gpt-6-luna",
+        "input": "The screen is broken.",
+        "questions": [{"type": "predicate", "instructions": "Is it damaged?"}],
+    }
+    response_payload = {
+        "model": "gpt-6-luna",
+        "answers": [{"type": "predicate", "name": None, "probability": 0.95}],
+        "usage": {
+            "input_tokens": 42,
+            "input_tokens_details": {"cached_tokens": 10, "cache_write_tokens": 5},
+            "output_tokens": 0,
+            "total_tokens": 42,
+        },
+    }
+
+    async def upstream(request: web.Request) -> web.Response:
+        recorded.append(await request.json())
+        assert request.headers["Authorization"] == "Bearer upstream-token"
+        assert request.headers[MESHAGENT_PROJECT_ID_HEADER] == "project-123"
+        return web.json_response(response_payload, status=status)
+
+    app = web.Application()
+    app.router.add_post("/openai/v1/decisions", upstream)
+    runner, _, base_url = await _start_test_server(app)
+
+    async def token_provider() -> str:
+        return "upstream-token"
+
+    proxy = LocalLLMProxyServer(
+        api_base_url=base_url,
+        project_id="project-123",
+        upstream_bearer_token_provider=token_provider,
+        host="127.0.0.1",
+        port=0,
+        bearer_token="local-token",
+    )
+    try:
+        await proxy.start()
+        async with (
+            new_client_session() as client,
+            client.post(
+                f"{proxy.env()['OPENAI_BASE_URL']}/decisions",
+                headers={"Authorization": "Bearer local-token"},
+                json=payload,
+            ) as response,
+        ):
+            assert response.status == status
+            assert await response.json() == response_payload
+        snapshot = await proxy.usage_collector.snapshot()
+        assert recorded == [payload]
+        if status != 200:
+            assert snapshot.total_requests == 0
+            assert snapshot.recent_requests[0].status == status
+            return
+        assert snapshot.total_requests == 1
+        assert snapshot.subtotal == pytest.approx(42 * 0.10 / 1_000_000)
+        assert snapshot.total == pytest.approx(snapshot.subtotal * 1.05)
+        assert snapshot.summaries[0].tokens == {
+            "input_tokens_decisions": 42.0,
+            "total_tokens": 42.0,
+        }
+        assert snapshot.recent_requests[0].path.endswith("/v1/decisions")
+        assert snapshot.recent_requests[0].total == pytest.approx(snapshot.total)
+    finally:
+        await proxy.close()
+        await runner.cleanup()
 
 
 @pytest.mark.asyncio
