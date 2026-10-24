@@ -10,6 +10,9 @@ license = "Apache-2.0"
 keywords = []
 dependencies = [
   "aiohttp[speedups]~=3.13.0",
+  # CVE-2026-111497: aiohttp speedups must use patched Brotli decoders.
+  "brotli>=1.2.1; platform_python_implementation == 'CPython'",
+  "brotlicffi>=1.2.1.0; platform_python_implementation != 'CPython'",
   "meshagent-anthropic==0.55.1",
   "meshagent-openai==0.55.1",
 ]
