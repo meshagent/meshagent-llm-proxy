@@ -13,8 +13,8 @@ dependencies = [
   # CVE-2026-111497: aiohttp speedups must use patched Brotli decoders.
   "brotli>=1.2.1; platform_python_implementation == 'CPython'",
   "brotlicffi>=1.2.1.0; platform_python_implementation != 'CPython'",
-  "meshagent-anthropic==0.55.2",
-  "meshagent-openai==0.55.2",
+  "meshagent-anthropic==0.56.0",
+  "meshagent-openai==0.56.0",
 ]
 dynamic = ["version", "readme"]
 
