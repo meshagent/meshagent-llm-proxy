@@ -1373,7 +1373,8 @@ pricing = {
     },
     "meshagent": {
         "room": {"minutes": 0.01},
-        "daily-storage": {"gibibyte_days": 0.05},
+        # $0.05 per GiB-month, prorated daily using a 30-day billing month.
+        "daily-storage": {"gibibyte_days": 0.05 / 30},
     },
     "meshagent.perplexity": {
         "sonar-deep-research": {
