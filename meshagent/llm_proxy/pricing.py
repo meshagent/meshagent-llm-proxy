@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from meshagent.anthropic.usage import preprocess_anthropic_usage
 from meshagent.openai.tools.usage import preprocess_openai_usage
@@ -50,8 +51,14 @@ OPENAI_LONG_CONTEXT_THRESHOLDS = {
     "gpt-6-astra": 272000,
     "gpt-6-sol": 272000,
     "gpt-6.1-sol": 272000,
+    "gpt-6.1-terra": 272000,
+    "gpt-6.2-astra": 272000,
+    "gpt-6.2-sol": 272000,
     "gpt-6-luna": 272000,
 }
+
+# Midnight Pacific time on March 1, 2027.
+GPT_6_2_ULTRAFAST_PROMOTION_END = datetime(2027, 3, 1, 8, tzinfo=UTC)
 
 GROK_LONG_CONTEXT_THRESHOLD = 200_000
 
@@ -125,6 +132,13 @@ def _apply_openai_service_tier(
     model_pricing = pricing.get("openai", {}).get(model)
     if not isinstance(model_pricing, dict):
         return tokens
+
+    if (
+        tier == "ultrafast"
+        and "input_tokens_ultrafast_promo" in model_pricing
+        and datetime.now(UTC) < GPT_6_2_ULTRAFAST_PROMOTION_END
+    ):
+        tier = "ultrafast_promo"
 
     out = dict(tokens)
 
@@ -670,18 +684,49 @@ gpt_6_sol_pricing = openai_cached_text_pricing(input_price=2.00, output_price=10
 gpt_6_1_sol_pricing = openai_cached_text_pricing(
     input_price=2.00, output_price=10.00, cache_read_multiplier=0.05
 )
+gpt_6_1_terra_pricing = openai_cached_text_pricing(
+    input_price=1.00, output_price=5.00, cache_read_multiplier=0.05
+)
 gpt_6_luna_pricing = openai_cached_text_pricing(input_price=0.10, output_price=0.50)
-# Ultrafast is available only for GPT-6 Astra, at 6x Standard rates.
-for token_type in (
-    "input_tokens",
-    "cached_tokens",
-    "cache_write_tokens",
-    "output_tokens",
-):
-    gpt_6_astra_pricing[f"{token_type}_ultrafast"] = gpt_6_astra_pricing[token_type] * 6
-    gpt_6_astra_pricing[f"{token_type}_ultrafast_long"] = (
-        gpt_6_astra_pricing[f"{token_type}_long"] * 6
-    )
+
+
+def openai_ultrafast_rates(
+    rates: dict[str, float], *, tier: str, multiplier: float
+) -> dict[str, float]:
+    return {
+        f"{token_type}_{tier}{context}": rates[f"{token_type}{context}"] * multiplier
+        for token_type in (
+            "input_tokens",
+            "cached_tokens",
+            "cache_write_tokens",
+            "output_tokens",
+        )
+        for context in ("", "_long")
+    }
+
+
+def gpt_6_2_pricing(*, input_price: float, output_price: float) -> dict[str, float]:
+    # GPT-6.2 offers Batch and discounted background processing in place of Flex.
+    rates = {
+        key: rate
+        for key, rate in openai_cached_text_pricing(
+            input_price=input_price,
+            output_price=output_price,
+            cache_read_multiplier=0.05,
+        ).items()
+        if "_flex" not in key
+    }
+    return {
+        **rates,
+        **openai_ultrafast_rates(rates, tier="ultrafast", multiplier=6),
+        **openai_ultrafast_rates(rates, tier="ultrafast_promo", multiplier=3),
+    }
+
+
+gpt_6_2_astra_pricing = gpt_6_2_pricing(input_price=8.00, output_price=40.00)
+gpt_6_2_sol_pricing = gpt_6_2_pricing(input_price=2.00, output_price=10.00)
+for rates in (gpt_6_astra_pricing, gpt_6_1_sol_pricing):
+    rates.update(openai_ultrafast_rates(rates, tier="ultrafast", multiplier=6))
 
 # Codex mini pricing.
 # Source: https://platform.openai.com/docs/pricing
@@ -795,7 +840,10 @@ claude_sonnet_5_pricing = {
     "output_tokens": per_million(10.00),
 }
 
-claude_sonnet_5_5_pricing = claude_sonnet_5_pricing
+claude_sonnet_5_5_pricing = {
+    **claude_sonnet_5_pricing,
+    "cache_read_input_tokens": per_million(0.10),
+}
 claude_opus_5_pricing = claude_opus_4_8_pricing
 claude_opus_5_5_pricing = {
     "input_tokens": per_million(4.00),
@@ -813,7 +861,24 @@ claude_fable_5_1_pricing = {
     **claude_fable_5_pricing,
     "cache_read_input_tokens": per_million(0.25),
 }
+claude_fable_5_2_pricing = {
+    "input_tokens": per_million(8.00),
+    "cache_creation_input_tokens": per_million(10.00),
+    "cache_read_input_tokens": per_million(0.20),
+    "output_tokens": per_million(40.00),
+}
 
+claude_haiku_5_5_pricing = {
+    "input_tokens": per_million(0.10),
+    "cache_creation_input_tokens": per_million(0.125),
+    "cache_read_input_tokens": per_million(0.01),
+    "output_tokens": per_million(0.50),
+    # Anthropic applies these rates to the full request above 100K prompt tokens.
+    "input_tokens_long": per_million(0.50),
+    "cache_creation_input_tokens_long": per_million(0.625),
+    "cache_read_input_tokens_long": per_million(0.05),
+    "output_tokens_long": per_million(2.50),
+}
 claude_haiku_4_5_pricing = {
     "input_tokens": per_million(1.00),
     "cache_creation_input_tokens": per_million(1.25),
@@ -1022,7 +1087,10 @@ pricing = {
             "input_characters": per_million(30.00),
         },
         "gpt-5": gpt_5_pricing,
+        "gpt-6.2-astra": gpt_6_2_astra_pricing,
+        "gpt-6.2-sol": gpt_6_2_sol_pricing,
         "gpt-6.1-sol": gpt_6_1_sol_pricing,
+        "gpt-6.1-terra": gpt_6_1_terra_pricing,
         "gpt-6-astra": gpt_6_astra_pricing,
         "gpt-6-sol": gpt_6_sol_pricing,
         "gpt-6-luna": {
@@ -1167,6 +1235,8 @@ pricing = {
         "o4-mini-2025-01-31": o4_mini_pricing,
     },
     "anthropic": {
+        "claude-fable-5-2": claude_fable_5_2_pricing,
+        "claude-mythos-5-2": claude_fable_5_2_pricing,
         "claude-fable-5-1": claude_fable_5_1_pricing,
         "claude-mythos-5-1": claude_fable_5_1_pricing,
         "claude-fable-5": claude_fable_5_pricing,
@@ -1174,6 +1244,7 @@ pricing = {
         "claude-opus-5-5": claude_opus_5_5_pricing,
         "claude-opus-5": claude_opus_5_pricing,
         "claude-sonnet-5-5": claude_sonnet_5_5_pricing,
+        "claude-haiku-5-5": claude_haiku_5_5_pricing,
         # Latest model aliases
         "claude-opus-4-8": claude_opus_4_8_pricing,
         "claude-opus-4-7": claude_opus_4_7_pricing,

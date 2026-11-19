@@ -1,3 +1,6 @@
+from datetime import UTC, datetime
+from unittest.mock import patch
+
 import pytest
 
 from meshagent.llm_proxy.pricing import is_pricing_available, pricing, preprocess
@@ -6,7 +9,10 @@ from meshagent.llm_proxy.pricing import is_pricing_available, pricing, preproces
 @pytest.mark.parametrize(
     "model,input_price,cached_price,output_price",
     [
+        ("gpt-6.2-astra", 8.00, 0.40, 40.00),
+        ("gpt-6.2-sol", 2.00, 0.10, 10.00),
         ("gpt-6.1-sol", 2.00, 0.10, 10.00),
+        ("gpt-6.1-terra", 1.00, 0.05, 5.00),
         ("gpt-6-astra", 10.00, 1.00, 50.00),
         ("gpt-6-sol", 2.00, 0.20, 10.00),
         ("gpt-6-luna", 0.10, 0.01, 0.50),
@@ -18,6 +24,12 @@ def test_gpt_6_billing_tiers(
     model, input_price, cached_price, output_price, tier, multiplier, total_input
 ):
     # Source: https://developers.openai.com/api/docs/pricing
+    if model.startswith("gpt-6.2-") and tier == "flex":
+        assert not is_pricing_available(
+            provider="openai", model=model, service_tier=tier
+        )
+        return
+
     tokens = preprocess(
         provider="openai",
         model=model,
@@ -73,7 +85,7 @@ def test_astra_ultrafast_bills_long_context_and_cache_writes():
     assert is_pricing_available(
         provider="openai", model="gpt-6-astra", service_tier="ultrafast"
     )
-    assert not is_pricing_available(
+    assert is_pricing_available(
         provider="openai", model="gpt-6.1-sol", service_tier="ultrafast"
     )
     assert sum(
@@ -83,15 +95,52 @@ def test_astra_ultrafast_bills_long_context_and_cache_writes():
 
 
 @pytest.mark.parametrize(
+    "model,standard_cost", [("gpt-6.2-astra", 3.54), ("gpt-6.2-sol", 0.885)]
+)
+@pytest.mark.parametrize(
+    "now,multiplier",
+    [
+        (datetime(2027, 3, 1, 7, 59, 59, tzinfo=UTC), 3),
+        (datetime(2027, 3, 1, 8, tzinfo=UTC), 6),
+    ],
+)
+def test_gpt_6_2_ultrafast_promotion(model, standard_cost, now, multiplier):
+    assert is_pricing_available(
+        provider="openai", model=model, service_tier="ultrafast"
+    )
+    with patch("meshagent.llm_proxy.pricing.datetime") as clock:
+        clock.now.return_value = now
+        tokens = preprocess(
+            provider="openai",
+            model=model,
+            service_tier="ultrafast",
+            usage={
+                "input_tokens": 300_000,
+                "input_tokens_details": {
+                    "cached_tokens": 100_000,
+                    "cache_write_tokens": 50_000,
+                },
+                "output_tokens": 1_000,
+            },
+        )
+    assert tokens is not None
+    assert sum(
+        quantity * pricing["openai"][model][key] for key, quantity in tokens.items()
+    ) == pytest.approx(standard_cost * multiplier)
+
+
+@pytest.mark.parametrize(
     "model,input_price,cached_price,output_price",
     [
         ("claude-opus-5", 5.00, 0.50, 25.00),
         ("claude-opus-5-5", 4.00, 0.20, 20.00),
-        ("claude-sonnet-5-5", 2.00, 0.20, 10.00),
+        ("claude-sonnet-5-5", 2.00, 0.10, 10.00),
         ("claude-fable-5", 10.00, 1.00, 50.00),
         ("claude-mythos-5", 10.00, 1.00, 50.00),
         ("claude-fable-5-1", 10.00, 0.25, 50.00),
         ("claude-mythos-5-1", 10.00, 0.25, 50.00),
+        ("claude-fable-5-2", 8.00, 0.20, 40.00),
+        ("claude-mythos-5-2", 8.00, 0.20, 40.00),
     ],
 )
 def test_new_claude_models_bill_standard_rates_across_full_context(
@@ -118,6 +167,38 @@ def test_new_claude_models_bill_standard_rates_across_full_context(
     assert sum(
         quantity * pricing["anthropic"][model][key] for key, quantity in tokens.items()
     ) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(
+    "input_tokens,suffix,multiplier", [(50_000, "", 1), (50_001, "_long", 5)]
+)
+def test_claude_haiku_5_5_counts_cache_tokens_toward_long_context(
+    input_tokens, suffix, multiplier
+):
+    model = "claude-haiku-5-5"
+    tokens = preprocess(
+        provider="anthropic",
+        model=model,
+        usage={
+            "input_tokens": input_tokens,
+            "cache_creation_input_tokens": 10_000,
+            "cache_read_input_tokens": 40_000,
+            "output_tokens": 1_000,
+        },
+    )
+    assert tokens == {
+        f"input_tokens{suffix}": input_tokens,
+        f"cache_creation_input_tokens{suffix}": 10_000,
+        f"cache_read_input_tokens{suffix}": 40_000,
+        f"output_tokens{suffix}": 1_000,
+    }
+    assert sum(
+        quantity * pricing["anthropic"][model][key] for key, quantity in tokens.items()
+    ) == pytest.approx(
+        (input_tokens * 0.10 + 10_000 * 0.125 + 40_000 * 0.01 + 1_000 * 0.50)
+        * multiplier
+        / 1_000_000
+    )
 
 
 @pytest.mark.parametrize(
