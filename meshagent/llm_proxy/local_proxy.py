@@ -33,7 +33,7 @@ from meshagent.llm_proxy.usage import (
     extract_openai_image_usage,
     extract_openai_realtime_usage,
     extract_openai_transcription_model_from_session,
-    merge_cumulative_usage,
+    merge_cumulative_message_usage,
 )
 
 
@@ -567,6 +567,7 @@ class LocalLLMProxyServer:
                     if payload.get("type") not in {
                         "response.completed",
                         "response.done",
+                        "response.incomplete",
                     }:
                         return
 
@@ -683,10 +684,10 @@ class LocalLLMProxyServer:
                                             payload = None
 
                                         if isinstance(payload, dict):
-                                            if (
-                                                current_event.event
-                                                == "response.completed"
-                                            ):
+                                            if current_event.event in {
+                                                "response.completed",
+                                                "response.incomplete",
+                                            }:
                                                 usage = extract_openai_compatible_completion_usage(
                                                     provider=provider,
                                                     model=model,
@@ -898,7 +899,7 @@ class LocalLLMProxyServer:
                 lines: list[str] = []
                 hanging_line = ""
                 stream = resp.content_type == "text/event-stream"
-                stream_usage: dict[str, float] = {}
+                stream_usage: dict[str, Any] = {}
 
                 async for chunk in resp.content.iter_any():
                     if stream:
@@ -934,7 +935,7 @@ class LocalLLMProxyServer:
                                                     usage = message.get("usage")
 
                                             if isinstance(usage, dict):
-                                                merge_cumulative_usage(
+                                                merge_cumulative_message_usage(
                                                     stream_usage,
                                                     usage,
                                                 )

@@ -61,6 +61,13 @@ OPENAI_LONG_CONTEXT_THRESHOLDS = {
 GPT_6_2_ULTRAFAST_PROMOTION_END = datetime(2027, 3, 1, 8, tzinfo=UTC)
 
 GROK_LONG_CONTEXT_THRESHOLD = 200_000
+_GROK_SEARCH_USAGE_TYPES = (
+    "web_search_calls",
+    "x_posts_fetched",
+    "x_users_fetched",
+    "file_search_calls",
+    "document_search_calls",
+)
 
 
 def _openai_input_tokens_for_context_pricing(tokens: dict[str, float]) -> float:
@@ -342,6 +349,12 @@ def preprocess(
     if tokens is None:
         return None
 
+    if provider == "grok":
+        # Only the documented provider counters are priced. The generic
+        # OpenAI-compatible token parser also flattens numeric detail fields.
+        for usage_type in _GROK_SEARCH_USAGE_TYPES:
+            tokens.pop(usage_type, None)
+
     if provider == "openai":
         tier_tokens = _apply_openai_service_tier(
             model=model,
@@ -356,11 +369,33 @@ def preprocess(
         tokens = _apply_grok_context_length_tier(
             _apply_grok_service_tier(tokens=tokens, service_tier=service_tier)
         )
+
+    details = (
+        usage.get("server_side_tool_usage_details") if provider == "grok" else None
+    )
+    if isinstance(details, dict):
+        for usage_type in _GROK_SEARCH_USAGE_TYPES:
+            _add_tool_usage(tokens, details.get(usage_type), usage_type)
+
+    if provider in {"anthropic", "grok"} and not (
+        isinstance(details, dict) and "web_search_calls" in details
+    ):
+        server_tools = usage.get("server_tool_use")
+        if isinstance(server_tools, dict):
+            _add_tool_usage(
+                tokens, server_tools.get("web_search_requests"), "web_search_calls"
+            )
+
     filtered_tokens = _drop_zero_usage_values(tokens)
     if len(filtered_tokens) == 0:
         return None
 
     return filtered_tokens
+
+
+def _add_tool_usage(tokens: dict[str, float], count: object, usage_type: str) -> None:
+    if isinstance(count, int) and not isinstance(count, bool) and count > 0:
+        tokens[usage_type] = float(count)
 
 
 gpt_4_1_pricing = {
@@ -1415,6 +1450,36 @@ pricing = {
 }
 
 
+# Provider-wide search rates apply independently of the model's token tier.
+_TOOL_USAGE_PRICING = {
+    # https://developers.openai.com/api/docs/pricing
+    "openai": {
+        "web_search_calls": per_thousand(10),
+        "web_search_preview_calls": per_thousand(25),
+    },
+    # https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool
+    "anthropic": {"web_search_calls": per_thousand(10)},
+    # https://docs.x.ai/developers/pricing
+    "grok": {
+        "web_search_calls": per_thousand(5),
+        "x_posts_fetched": per_thousand(5),
+        "x_users_fetched": per_thousand(10),
+        "file_search_calls": per_thousand(2.5),
+        "document_search_calls": per_thousand(5),
+    },
+}
+
+
+def usage_unit_price(*, provider: str, model: str, usage_type: str) -> float | None:
+    model_rates = pricing.get(provider, {}).get(model)
+    if model_rates is None:
+        return None
+    model_rate = model_rates.get(usage_type)
+    if model_rate is not None:
+        return model_rate
+    return _TOOL_USAGE_PRICING.get(provider, {}).get(usage_type)
+
+
 def supports_llm_proxy_surcharge(provider: str) -> bool:
     return provider in LLM_PROXY_SURCHARGED_PROVIDERS
 
@@ -1428,21 +1493,15 @@ def build_usage_pricing_line_items(
 ) -> list[UsagePricingLineItem]:
     line_items = list[UsagePricingLineItem]()
 
-    provider_pricing = pricing.get(provider)
-    if not isinstance(provider_pricing, dict):
-        return line_items
-
-    model_pricing = provider_pricing.get(model)
-    if not isinstance(model_pricing, dict):
-        return line_items
-
     subtotal = 0.0
     for usage_type, total in usage.items():
         surcharge_only = usage_type.startswith("custom_")
         priced_usage_type = (
             usage_type.removeprefix("custom_") if surcharge_only else usage_type
         )
-        unit_price = model_pricing.get(priced_usage_type)
+        unit_price = usage_unit_price(
+            provider=provider, model=model, usage_type=priced_usage_type
+        )
         if unit_price is None:
             continue
 

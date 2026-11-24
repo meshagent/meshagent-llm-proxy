@@ -139,7 +139,7 @@ def extract_openai_compatible_completion_usage(
 
     usage = response.get("usage")
     if not isinstance(usage, dict):
-        return None
+        usage = {}
 
     service_tier = request.get("service_tier")
     if not isinstance(service_tier, str) or api_path == "/v1/decisions":
@@ -154,17 +154,82 @@ def extract_openai_compatible_completion_usage(
     if not isinstance(resolved_model, str):
         return None
 
-    tokens = preprocess(
-        provider=provider,
-        model=resolved_model,
-        usage=usage,
-        service_tier=service_tier,
-        api_path=api_path,
+    tokens = (
+        preprocess(
+            provider=provider,
+            model=resolved_model,
+            usage=usage,
+            service_tier=service_tier,
+            api_path=api_path,
+        )
+        or {}
     )
-    if tokens is None:
+    if provider == "openai" and api_path != "/v1/decisions":
+        tokens.pop("web_search_calls", None)
+        tokens.pop("web_search_preview_calls", None)
+        _add_openai_web_search_usage(
+            tokens, model=resolved_model, request=request, response=response
+        )
+    if not tokens:
         return None
 
     return ModelUsage(provider=provider, model=resolved_model, tokens=tokens)
+
+
+def _add_openai_web_search_usage(
+    tokens: dict[str, float],
+    *,
+    model: str,
+    request: dict[str, Any],
+    response: dict[str, Any],
+) -> None:
+    if response.get("status") in ("queued", "in_progress"):
+        return
+
+    tool_usage = response.get("tool_usage")
+    search_usage = (
+        tool_usage.get("web_search") if isinstance(tool_usage, dict) else None
+    )
+    calls = search_usage.get("num_requests") if isinstance(search_usage, dict) else None
+    if not isinstance(calls, int) or isinstance(calls, bool) or calls < 0:
+        output = response.get("output")
+        if not isinstance(output, list):
+            return
+        calls = 0
+        for item in output:
+            if (
+                not isinstance(item, dict)
+                or item.get("type") != "web_search_call"
+                or item.get("status") != "completed"
+            ):
+                continue
+            action = item.get("action")
+            if isinstance(action, dict) and action.get("type") not in (None, "search"):
+                continue
+            calls += 1
+    if not calls:
+        return
+
+    tools = response.get("tools") or request.get("tools")
+    tool_types = (
+        {
+            tool["type"]
+            for tool in tools
+            if isinstance(tool, dict) and isinstance(tool.get("type"), str)
+        }
+        if isinstance(tools, list)
+        else set()
+    )
+    preview_only = bool(
+        tool_types & {"web_search_preview", "web_search_preview_2025_03_11"}
+    ) and not tool_types & {"web_search", "web_search_2025_08_26"}
+    reasoning_model = model.startswith(("gpt-5", "gpt-6", "o1", "o3", "o4"))
+    usage_type = (
+        "web_search_preview_calls"
+        if preview_only and not reasoning_model
+        else "web_search_calls"
+    )
+    tokens[usage_type] = float(calls)
 
 
 def extract_anthropic_completion_usage(
@@ -300,6 +365,20 @@ def merge_cumulative_usage(
             continue
         totals[key] = max(totals.get(key, 0.0), float(value))
     return totals
+
+
+def merge_cumulative_message_usage(
+    totals: dict[str, Any], usage: Mapping[str, object]
+) -> None:
+    for key, value in usage.items():
+        if isinstance(value, int | float):
+            previous = totals.get(key)
+            if not isinstance(previous, int | float) or value > previous:
+                totals[key] = value
+        elif isinstance(value, dict):
+            nested = totals.setdefault(key, {})
+            if isinstance(nested, dict):
+                merge_cumulative_message_usage(nested, value)
 
 
 def resolve_openai_image_pricing_key(

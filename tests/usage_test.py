@@ -17,7 +17,128 @@ from meshagent.llm_proxy.usage import (
     extract_openai_compatible_completion_usage,
     extract_openai_completion_usage,
     extract_openai_transcription_model_from_session,
+    merge_cumulative_message_usage,
 )
+
+
+@pytest.mark.parametrize(
+    ("model", "tool", "reported", "usage_type", "unit_price"),
+    [
+        ("gpt-5.5", "web_search", 2, "web_search_calls", 0.01),
+        ("gpt-5.5", "web_search", 0, None, 0),
+        ("gpt-5.5", "web_search_preview", None, "web_search_calls", 0.01),
+        ("gpt-4.1", "web_search_preview", None, "web_search_preview_calls", 0.025),
+    ],
+)
+def test_openai_web_search_billing(
+    model: str,
+    tool: str,
+    reported: int | None,
+    usage_type: str | None,
+    unit_price: float,
+) -> None:
+    response = {
+        "model": model,
+        "usage": {"input_tokens": 10},
+        "output": [
+            {
+                "type": "web_search_call",
+                "status": "completed",
+                "action": {"type": "search"},
+            },
+            {
+                "type": "web_search_call",
+                "status": "completed",
+                "action": {"type": "open_page"},
+            },
+            {
+                "type": "web_search_call",
+                "status": "failed",
+                "action": {"type": "search"},
+            },
+        ],
+    }
+    if reported is not None:
+        response["tool_usage"] = {"web_search": {"num_requests": reported}}
+    usage = extract_openai_completion_usage(
+        model=model,
+        request={"model": model, "tools": [{"type": tool}]},
+        response=response,
+    )
+    assert usage is not None
+    assert usage.tokens["input_tokens"] == 10
+    line_items = build_usage_pricing_line_items(
+        provider="openai", model=model, usage=usage.tokens
+    )
+    search_items = [item for item in line_items if item.type.startswith("web_search")]
+    if usage_type is None:
+        assert search_items == []
+    else:
+        assert [
+            (item.type, item.quantity, item.unit_price) for item in search_items
+        ] == [(usage_type, reported if reported is not None else 1, unit_price)]
+
+
+def test_anthropic_web_search_cumulative_usage_keeps_the_final_search_count() -> None:
+    stream_usage = {}
+    for count in (0, 2, 2, 1):
+        merge_cumulative_message_usage(
+            stream_usage,
+            {
+                "input_tokens": 210_000,
+                "server_tool_use": {"web_search_requests": count},
+            },
+        )
+    usage = extract_anthropic_completion_usage(
+        model="claude-sonnet-4-5", request={}, response={"usage": stream_usage}
+    )
+    assert usage is not None
+    assert usage.tokens == {"input_tokens_long": 210_000, "web_search_calls": 2}
+    items = build_usage_pricing_line_items(
+        provider=usage.provider, model=usage.model, usage=usage.tokens
+    )
+    assert (
+        next(item.amount for item in items if item.type == "web_search_calls") == 0.02
+    )
+
+
+def test_grok_search_uses_reported_items_and_flat_tool_rates() -> None:
+    usage = extract_openai_compatible_completion_usage(
+        provider="grok",
+        model="grok-4.6",
+        request={"service_tier": "priority"},
+        response={
+            "usage": {
+                "input_tokens": 200_000,
+                "server_side_tool_usage_details": {
+                    "web_search_calls": 2,
+                    "x_search_calls": 4,
+                    "x_posts_fetched": 12,
+                    "x_users_fetched": 3,
+                    "file_search_calls": 2,
+                    "document_search_calls": 1,
+                },
+            }
+        },
+    )
+    assert usage is not None
+    assert usage.tokens["input_tokens_priority_long"] == 200_000
+    items = build_usage_pricing_line_items(
+        provider=usage.provider, model=usage.model, usage=usage.tokens
+    )
+    assert {
+        item.type: item.amount
+        for item in items
+        if item.type != "input_tokens_priority_long" and not item.is_surcharge
+    } == pytest.approx(
+        {
+            "web_search_calls": 0.01,
+            "x_posts_fetched": 0.06,
+            "x_users_fetched": 0.03,
+            "file_search_calls": 0.005,
+            "document_search_calls": 0.005,
+        }
+    )
 
 
 def test_extract_openai_completion_usage_prefers_priced_response_model() -> None:
